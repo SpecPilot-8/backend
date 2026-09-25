@@ -16,15 +16,20 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 brew install tesseract tesseract-lang   # OCR 엔진 (Python 패키지 아님, 시스템 설치)
+brew install postgresql@17              # DB (이미 있으면 생략)
+createdb specpilot
+psql -d specpilot -f db/schema.sql
 ```
 
 ## 실행
 
 ```bash
+# 콘솔 출력 + /tmp/screens.json 덤프
 python scripts/run_extract.py "<기획서 PDF 경로>"
-```
 
-화면별 추출 결과를 요약 출력하고, 전체 JSON을 `/tmp/screens.json`에 저장한다.
+# 파싱 후 DB(screen/requirement 테이블)에 적재
+python db/load_screens.py "<기획서 PDF 경로>"
+```
 
 ## 구조
 
@@ -33,6 +38,11 @@ python scripts/run_extract.py "<기획서 PDF 경로>"
   - `parse_screen()` / `parse_pdf()`: 화면별 Description/Action-Event 행 추출
 - `scripts/run_extract.py` — 실행 스크립트
 - `scripts/inspect_pdf.py` — 좌표 디버깅용 보조 스크립트
+- `db/schema.sql` — `screen`/`requirement` 테이블 정의
+- `db/load_screens.py` — 파싱 결과를 DB에 적재 (같은 stable_key는 덮어씀)
+
+`req_type`/`verifiable`은 아직 분류 로직이 없어 DB에는 NULL로 들어간다. 다음
+단계(제약조건 정규화)에서 채운다.
 
 ## 알려진 한계
 
