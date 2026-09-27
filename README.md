@@ -31,10 +31,14 @@ python scripts/run_extract.py "<기획서 PDF 경로>"
 # 파싱 후 DB(screen/requirement 테이블)에 적재
 python db/load_screens.py "<기획서 PDF 경로>"
 
-# 코드 청킹 후 DB(snapshot/chunk 테이블)에 적재
-python db/load_code.py "<소스 루트 경로>" <repo_id>
-# 예: python db/load_code.py specpilot_projects_share/specpilot/src/main spring-sample
+# 코드 청킹 후 DB(snapshot/chunk 테이블)에 적재 — 경로는 반드시 레포 루트
+python db/load_code.py "<레포 루트>" <repo_id>
+# 예: python db/load_code.py specpilot_projects_share/specpilot spring-sample
+#     python db/load_code.py specpilot_projects_share/specpilot-react react-sample
 ```
+
+`chunk.file_path`는 레포 루트 기준 상대경로이고, 그 기준점은 `snapshot.root_path`에
+저장된다. 두 값을 합쳐야 실제 파일을 찾을 수 있으므로 루트를 바꿔 적재하면 안 된다.
 
 ## 구조
 
@@ -46,11 +50,17 @@ python db/load_code.py "<소스 루트 경로>" <repo_id>
 - `scripts/inspect_pdf.py` — 좌표 디버깅용 보조 스크립트
 - `db/load_screens.py` — 파싱 결과를 `screen`/`requirement` 테이블에 적재 (같은 stable_key는 덮어씀)
 
-**코드 청킹**
-- `chunker/java_chunker.py` — tree-sitter로 Java를 파싱해 필드/메서드 단위 청크 추출
-- `chunker/js_chunker.py` — tree-sitter로 JS/JSX를 파싱해 함수 단위 청크 추출
+**코드 청킹** (tree-sitter 기반 AST 파싱)
+- `chunker/java_chunker.py` — 클래스 헤더 / 메서드 / 필드 단위
+- `chunker/js_chunker.py` — 함수·컴포넌트 단위
+- `chunker/html_chunker.py` — Thymeleaf 템플릿의 블록(form, table, nav ...) 단위
 - `db/load_code.py` — 소스 트리를 청킹해 `snapshot`/`chunk` 테이블에 적재. git 저장소가
   아니라 파일 해시 트리를 snapshot_id로 씀
+
+청크끼리 겹치지 않게 만든다. 원칙1에서 LLM이 후보 청크 중 하나를 고르는데, 부모와
+자식이 둘 다 후보로 올라오면 같은 코드가 두 번 등장해 선택이 모호해지기 때문이다.
+그래서 중첩 함수는 바깥 함수에 포함시키고, 클래스는 본문을 뺀 헤더(어노테이션 +
+선언부)만 청크로 남긴다.
 
 - `db/schema.sql` — 전체 테이블 정의
 
@@ -61,7 +71,13 @@ python db/load_code.py "<소스 루트 경로>" <repo_id>
 
 - 헤더 좌표는 현재 샘플 PDF 템플릿 기준으로 고정값. 다른 레이아웃의 기획서가 들어오면
   좌표를 다시 잡아야 한다.
-- OCR 신뢰도 점수가 높아도 오독 사례가 있었음(예: "마이페이지" → "파이페이지").
-  신뢰도만으로 자동 확정하지 말고 사람 검수 큐로 연결할 것.
+- OCR 신뢰도 점수가 높아도 오독 사례가 있음. 실제로 "마이페이지" → "파이페이지"
+  오독이 신뢰도 0.948로 나왔다. 신뢰도만으로는 못 거르니 사람 검수 큐로 연결할 것.
+  (`screen.needs_review` / `review_reasons`에 사유가 쌓인다. 자동 교정은 하지 않는다 —
+  조용히 고치면 틀린 값이 맞는 값처럼 보이기 때문)
 - yml/properties 설정 파일은 지금 파일 전체를 청크 하나로 둔다. 키 단위로
   쪼개는 건 값 비교 규칙엔진을 붙일 때 필요해지면 한다.
+- 테스트 코드(`test` 디렉터리)는 청킹 대상에서 제외한다. 테스트에 기능이 언급됐다는
+  이유로 implemented 판정이 나면 오탐이 된다.
+- CSS는 청킹하지 않는다. "선택된 메뉴는 배경색 Navy" 같은 요구사항을 다루려면
+  포함해야 하지만, 이는 원칙4의 `not_statically_verifiable` 쪽에 가깝다.

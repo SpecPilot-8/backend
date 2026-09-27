@@ -15,7 +15,7 @@ OCR로 복구한다"는 일반 규칙으로 처리한다 (claude.md 원칙3과 �
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pymupdf
 import pytesseract
@@ -34,6 +34,13 @@ HEADER_CELLS = {
 RIGHT_COLUMN_X0 = 489.0
 
 ROW_INDEX_RE = re.compile(r"^([0-9]+|[A-Z])\s*\n?")
+
+# 화면ID는 stable_key의 뿌리라 OCR 오독이 그대로 굳으면 요구사항 전체가
+# 잘못된 키를 갖게 된다. 형식을 검증해 어긋나면 검수 대상으로 올린다.
+SCREEN_ID_RE = re.compile(r"^[A-Z]{2,12}-\d{3}$")
+
+# 이 값 아래면 OCR 결과를 그대로 믿지 않는다.
+OCR_CONFIDENCE_FLOOR = 0.5
 
 
 def _ocr_cell(page: pymupdf.Page, x0: float, x1: float, lang: str = "kor+eng") -> tuple[str, float]:
@@ -142,8 +149,21 @@ def parse_screen(page: pymupdf.Page) -> dict | None:
 
     screen_id = header["screen_id"]["value"] or f"UNKNOWN-p{page.number}"
 
+    # 원칙3: 의심스러운 것만 사람 검수 큐에 올린다. 자동으로 교정하지 않는다 —
+    # OCR 오독을 조용히 고치면 틀린 값이 맞는 값처럼 보이기 때문이다.
+    review_reasons = []
+    if not SCREEN_ID_RE.match(screen_id):
+        review_reasons.append(f"screen_id 형식 불일치: {screen_id!r}")
+    for name, info in header.items():
+        if info["source"] == "ocr" and info["confidence"] < OCR_CONFIDENCE_FLOOR:
+            review_reasons.append(f"{name} OCR 신뢰도 낮음: {info['confidence']}")
+        if info["source"] == "ocr" and not info["value"]:
+            review_reasons.append(f"{name} 값을 읽지 못함")
+
     return {
         "screen_id": screen_id,
+        "needs_review": bool(review_reasons),
+        "review_reasons": review_reasons,
         "screen_name": header["screen_name"]["value"],
         "depth": header["depth"]["value"],
         "author": header["author"]["value"],
@@ -171,11 +191,37 @@ def parse_screen(page: pymupdf.Page) -> dict | None:
     }
 
 
-def parse_pdf(path: str) -> list[dict]:
+def parse_pdf(path: str) -> tuple[list[dict], list[dict]]:
+    """(추출된 화면 목록, 건너뛴 페이지 목록)을 반환.
+
+    건너뛴 페이지를 조용히 버리면 진짜 화면이 파싱에 실패했을 때도 "빈 변형
+    페이지"와 구분되지 않는다. 호출자가 확인할 수 있게 같이 돌려준다.
+    """
     doc = pymupdf.open(path)
-    screens = []
+    screens: list[dict] = []
+    skipped: list[dict] = []
+    seen_ids: dict[str, int] = {}
+
     for page in doc:
         screen = parse_screen(page)
-        if screen is not None:
-            screens.append(screen)
-    return screens
+        if screen is None:
+            header = extract_header(page)
+            skipped.append({
+                "page_index": page.number,
+                "screen_id": header["screen_id"]["value"],
+                "screen_name": header["screen_name"]["value"],
+            })
+            continue
+
+        # 같은 screen_id가 두 페이지에서 나오면 뒤쪽이 앞쪽을 덮어쓴다.
+        # 조용히 지나가면 요구사항이 통째로 사라지므로 검수 사유로 남긴다.
+        sid = screen["screen_id"]
+        if sid in seen_ids:
+            screen["needs_review"] = True
+            screen["review_reasons"].append(
+                f"screen_id 중복: p{seen_ids[sid]}에서 이미 등장"
+            )
+        seen_ids[sid] = page.number
+        screens.append(screen)
+
+    return screens, skipped

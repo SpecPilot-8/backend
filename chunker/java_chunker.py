@@ -41,6 +41,23 @@ def chunk_java_file(file_path: str, content: str) -> list[Chunk]:
         body = class_node.child_by_field_name("body")
         if body is None:
             return
+
+        # 클래스 헤더(어노테이션 + 선언부)를 별도 청크로 남긴다.
+        # @Controller / @RequestMapping("/notices") 같은 클래스 레벨 어노테이션은
+        # URL 베이스 경로를 정하는데, 메서드·필드 청크 어디에도 들어가지 않아
+        # 이게 없으면 파이프라인에서 아예 보이지 않는다.
+        # 본문은 제외하고 `{` 직전까지만 잘라야 메서드 청크와 겹치지 않는다.
+        header_text = source[class_node.start_byte:body.start_byte].decode("utf-8").rstrip()
+        if header_text:
+            chunks.append(Chunk(
+                chunk_type="class",
+                file_path=file_path,
+                start_line=class_node.start_point[0] + 1,
+                end_line=body.start_point[0] + 1,
+                symbol_fqn=class_fqn,
+                content=header_text,
+            ))
+
         for member in body.children:
             if member.type in ("method_declaration", "constructor_declaration"):
                 mname_node = member.child_by_field_name("name")

@@ -12,8 +12,14 @@ CREATE TABLE IF NOT EXISTS screen (
     page_index INT NOT NULL,
     header_confidence JSONB,
     header_source JSONB,
+    -- 원칙3: 의심 구간만 사람 검수 큐로. 자동 교정하지 않고 사유를 남긴다.
+    needs_review BOOLEAN NOT NULL DEFAULT false,
+    review_reasons JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE screen ADD COLUMN IF NOT EXISTS needs_review BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE screen ADD COLUMN IF NOT EXISTS review_reasons JSONB;
 
 CREATE TABLE IF NOT EXISTS requirement (
     id BIGSERIAL PRIMARY KEY,
@@ -40,8 +46,13 @@ CREATE TABLE IF NOT EXISTS snapshot (
     id TEXT PRIMARY KEY,
     repo_id TEXT NOT NULL,
     commit_sha TEXT,
+    -- chunk.file_path가 어디를 기준으로 한 상대경로인지. 이게 없으면 DB만으로
+    -- 실제 파일 위치를 복원할 수 없다.
+    root_path TEXT,
     indexed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE snapshot ADD COLUMN IF NOT EXISTS root_path TEXT;
 
 CREATE TABLE IF NOT EXISTS chunk (
     id BIGSERIAL PRIMARY KEY,

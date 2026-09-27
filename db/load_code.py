@@ -13,13 +13,16 @@ from pathlib import Path
 import psycopg
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from chunker.html_chunker import chunk_html_file
 from chunker.java_chunker import chunk_java_file
 from chunker.js_chunker import chunk_js_file
 
 DSN = "dbname=specpilot"
 
-EXCLUDE_DIRS = {"node_modules", "build", ".gradle", ".git", "dist", "gradle"}
-INCLUDE_SUFFIXES = {".java", ".js", ".jsx", ".yml", ".yaml", ".properties", ".sql"}
+# test 제외: 테스트 코드는 구현 근거가 아니다. 테스트에 기능이 언급됐다는 이유로
+# implemented 판정이 나면 오탐이 된다.
+EXCLUDE_DIRS = {"node_modules", "build", ".gradle", ".git", "dist", "gradle", "test"}
+INCLUDE_SUFFIXES = {".java", ".js", ".jsx", ".html", ".yml", ".yaml", ".properties", ".sql"}
 CONFIG_SUFFIXES = {".yml", ".yaml", ".properties", ".sql"}
 
 
@@ -59,11 +62,13 @@ def chunk_repo(root: Path, repo_id: str):
             chunks.extend(chunk_java_file(rel_path, content))
         elif suffix in (".js", ".jsx"):
             chunks.extend(chunk_js_file(rel_path, content))
+        elif suffix == ".html":
+            chunks.extend(chunk_html_file(rel_path, content))
         elif suffix in CONFIG_SUFFIXES:
             # TODO: yml/properties는 지금 파일 전체를 한 청크로 둔다.
             # 키 단위로 쪼개는 건 값 비교 규칙엔진(원칙5) 붙일 때 필요해지면 한다.
-            line_count = content.count("\n") + 1
-            chunks.append(_config_chunk(rel_path, content, line_count))
+            # count("\n")+1은 파일 끝 개행 때문에 실제보다 1줄 많아진다.
+            chunks.append(_config_chunk(rel_path, content, len(content.splitlines())))
 
     return snapshot_id, chunks
 
@@ -85,9 +90,14 @@ def load(root: Path, repo_id: str) -> None:
 
     with psycopg.connect(DSN) as conn:
         with conn.cursor() as cur:
+            # root_path가 없으면 chunk.file_path가 무엇을 기준으로 한 상대경로인지
+            # 알 수 없어 DB만으로 실제 파일을 못 찾는다 (원칙1: 경로는 DB 조인으로 확정).
             cur.execute(
-                "INSERT INTO snapshot (id, repo_id) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
-                (snapshot_id, repo_id),
+                """
+                INSERT INTO snapshot (id, repo_id, root_path) VALUES (%s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET root_path = EXCLUDED.root_path
+                """,
+                (snapshot_id, repo_id, str(root)),
             )
             cur.execute("DELETE FROM chunk WHERE snapshot_id = %s", (snapshot_id,))
             for c in chunks:

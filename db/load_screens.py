@@ -23,7 +23,7 @@ def guess_doc_version(path: str) -> str | None:
 
 def load(pdf_path: str) -> None:
     doc_version = guess_doc_version(pdf_path)
-    screens = parse_pdf(pdf_path)
+    screens, skipped = parse_pdf(pdf_path)
 
     with psycopg.connect(DSN) as conn:
         with conn.cursor() as cur:
@@ -32,8 +32,9 @@ def load(pdf_path: str) -> None:
                     """
                     INSERT INTO screen
                         (screen_id, screen_name, depth, author, doc_version,
-                         source_file, page_index, header_confidence, header_source)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         source_file, page_index, header_confidence, header_source,
+                         needs_review, review_reasons)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (screen_id) DO UPDATE SET
                         screen_name = EXCLUDED.screen_name,
                         depth = EXCLUDED.depth,
@@ -42,12 +43,15 @@ def load(pdf_path: str) -> None:
                         source_file = EXCLUDED.source_file,
                         page_index = EXCLUDED.page_index,
                         header_confidence = EXCLUDED.header_confidence,
-                        header_source = EXCLUDED.header_source
+                        header_source = EXCLUDED.header_source,
+                        needs_review = EXCLUDED.needs_review,
+                        review_reasons = EXCLUDED.review_reasons
                     """,
                     (
                         s["screen_id"], s["screen_name"], s["depth"], s["author"],
                         doc_version, pdf_path, s["page_index"],
                         json.dumps(s["header_confidence"]), json.dumps(s["header_source"]),
+                        s["needs_review"], json.dumps(s["review_reasons"], ensure_ascii=False),
                     ),
                 )
 
@@ -73,6 +77,16 @@ def load(pdf_path: str) -> None:
         conn.commit()
 
     print(f"{len(screens)}개 화면 적재 완료 (doc_version={doc_version})")
+
+    flagged = [s for s in screens if s["needs_review"]]
+    if flagged:
+        print(f"\n검수 필요 {len(flagged)}건:")
+        for s in flagged:
+            print(f"  {s['screen_id']} (p{s['page_index']}): {', '.join(s['review_reasons'])}")
+    if skipped:
+        print(f"\n건너뛴 페이지 {len(skipped)}건 (표 내용 없음 — 상태 변형 페이지로 추정):")
+        for sk in skipped:
+            print(f"  p{sk['page_index']}: {sk['screen_id']} {sk['screen_name']}")
 
 
 if __name__ == "__main__":
