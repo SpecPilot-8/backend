@@ -1,6 +1,7 @@
-# SpecPilot Backend — 기획서 파서
+# SpecPilot Backend
 
-화면 기획서 PDF에서 화면 단위 요구사항(Description/Action-Event)을 추출하는 프로토타입.
+기획서-코드 정합성 검증 파이프라인 프로토타입. 지금은 (1) 기획서 파싱 → DB 적재,
+(2) 대조 대상 코드 청킹 → DB 적재 두 단계까지 되어 있다.
 
 ## 배경
 
@@ -29,17 +30,29 @@ python scripts/run_extract.py "<기획서 PDF 경로>"
 
 # 파싱 후 DB(screen/requirement 테이블)에 적재
 python db/load_screens.py "<기획서 PDF 경로>"
+
+# 코드 청킹 후 DB(snapshot/chunk 테이블)에 적재
+python db/load_code.py "<소스 루트 경로>" <repo_id>
+# 예: python db/load_code.py specpilot_projects_share/specpilot/src/main spring-sample
 ```
 
 ## 구조
 
+**기획서 파싱**
 - `extractor/pdf_screens.py` — 파서 본체
   - `extract_header()`: 헤더 4개 필드 추출 (직접 텍스트 우선, 없으면 OCR + 신뢰도 점수)
   - `parse_screen()` / `parse_pdf()`: 화면별 Description/Action-Event 행 추출
 - `scripts/run_extract.py` — 실행 스크립트
 - `scripts/inspect_pdf.py` — 좌표 디버깅용 보조 스크립트
-- `db/schema.sql` — `screen`/`requirement` 테이블 정의
-- `db/load_screens.py` — 파싱 결과를 DB에 적재 (같은 stable_key는 덮어씀)
+- `db/load_screens.py` — 파싱 결과를 `screen`/`requirement` 테이블에 적재 (같은 stable_key는 덮어씀)
+
+**코드 청킹**
+- `chunker/java_chunker.py` — tree-sitter로 Java를 파싱해 필드/메서드 단위 청크 추출
+- `chunker/js_chunker.py` — tree-sitter로 JS/JSX를 파싱해 함수 단위 청크 추출
+- `db/load_code.py` — 소스 트리를 청킹해 `snapshot`/`chunk` 테이블에 적재. git 저장소가
+  아니라 파일 해시 트리를 snapshot_id로 씀
+
+- `db/schema.sql` — 전체 테이블 정의
 
 `req_type`/`verifiable`은 아직 분류 로직이 없어 DB에는 NULL로 들어간다. 다음
 단계(제약조건 정규화)에서 채운다.
@@ -50,3 +63,5 @@ python db/load_screens.py "<기획서 PDF 경로>"
   좌표를 다시 잡아야 한다.
 - OCR 신뢰도 점수가 높아도 오독 사례가 있었음(예: "마이페이지" → "파이페이지").
   신뢰도만으로 자동 확정하지 말고 사람 검수 큐로 연결할 것.
+- yml/properties 설정 파일은 지금 파일 전체를 청크 하나로 둔다. 키 단위로
+  쪼개는 건 값 비교 규칙엔진을 붙일 때 필요해지면 한다.

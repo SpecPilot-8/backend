@@ -31,3 +31,29 @@ CREATE TABLE IF NOT EXISTS requirement (
 );
 
 CREATE INDEX IF NOT EXISTS idx_requirement_screen_id ON requirement(screen_id);
+
+-- 코드 대조 대상 (claude.md 6장 snapshot/chunk 참고)
+-- 원칙2: 모든 분석은 특정 시점(snapshot)에 고정한다.
+-- 샘플 코드가 git 저장소가 아니라서 commit_sha 대신 파일 해시 트리를 쓴다.
+
+CREATE TABLE IF NOT EXISTS snapshot (
+    id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL,
+    commit_sha TEXT,
+    indexed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS chunk (
+    id BIGSERIAL PRIMARY KEY,
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(id) ON DELETE CASCADE,
+    chunk_type TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    start_line INT NOT NULL,
+    end_line INT NOT NULL,
+    symbol_fqn TEXT,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_snapshot_id ON chunk(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_file_path ON chunk(file_path);

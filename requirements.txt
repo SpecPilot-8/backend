@@ -2,3 +2,6 @@ pymupdf
 pytesseract
 Pillow
 psycopg[binary]
+tree-sitter
+tree-sitter-java
+tree-sitter-javascript
