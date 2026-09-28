@@ -102,14 +102,32 @@ def build_identifier_edges(g: Graph) -> None:
         else:
             pattern = re.compile(rf"(?<![\w$]){re.escape(name)}(?![\w$])")
         for cid, c in g.chunks.items():
-            if language(c) != lang or cid in targets:
+            if language(c) != lang:
                 continue
-            if not pattern.search(c.content):
+            matches = list(pattern.finditer(c.content))
+            if not matches:
                 continue
-            # 같은 파일에 정의가 있으면 그것만 가리킨다. 서버의 PASSWORD_PATTERN이
-            # 클라이언트 MyPage의 동명 상수로 이어지는 식의 오연결을 막는다.
             local = {t for t in targets if g.chunks[t].file_path == c.file_path}
-            if local:
+            remote = targets - local
+
+            if lang == "java" and kind == "method":
+                # `memberService.signup(`처럼 앞에 객체가 붙은 호출은 다른 클래스의
+                # 메서드다. 호출하는 쪽 메서드 이름도 signup이면 예전엔 "자기 정의"로
+                # 보고 통째로 건너뛰어, 컨트롤러→서비스 연결이 끊겼다.
+                qualified = any(c.content[:m.start()].rstrip().endswith(".") for m in matches)
+                unqualified = any(not c.content[:m.start()].rstrip().endswith(".") for m in matches)
+                resolved = set()
+                if qualified:
+                    resolved |= remote
+                if unqualified:
+                    resolved |= local or remote
+                resolved.discard(cid)
+            elif cid in targets:
+                # JS는 선언문 자체가 이름과 일치하므로 자기 정의와 참조를 구분할 수 없다.
+                continue
+            elif local:
+                # 같은 파일에 정의가 있으면 그것만 가리킨다. 서버의 PASSWORD_PATTERN이
+                # 클라이언트 MyPage의 동명 상수로 이어지는 식의 오연결을 막는다.
                 resolved = local
             elif lang == "java" and kind == "field":
                 # Java 필드는 getter/this로 접근하므로 다른 클래스에서 이름만 같은
@@ -117,12 +135,13 @@ def build_identifier_edges(g: Graph) -> None:
                 continue
             else:
                 resolved = targets
+
             for t in resolved:
-                    g.add(cid, t)
-                    tc = g.chunks[t]
-                    if lang == "java" and tc.chunk_type == "class":
-                        for f in class_fields.get(tc.symbol_fqn, ()):
-                            g.add(cid, f)
+                g.add(cid, t)
+                tc = g.chunks[t]
+                if lang == "java" and tc.chunk_type == "class":
+                    for f in class_fields.get(tc.symbol_fqn, ()):
+                        g.add(cid, f)
 
 
 def normalize_url(path: str) -> str:
