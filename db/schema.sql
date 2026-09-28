@@ -68,3 +68,49 @@ CREATE TABLE IF NOT EXISTS chunk (
 
 CREATE INDEX IF NOT EXISTS idx_chunk_snapshot_id ON chunk(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_chunk_file_path ON chunk(file_path);
+
+-- 요구사항 ↔ 청크 매칭 (근거 후보 찾기). 판정(verdict) 이전 단계.
+-- 같은 입력에 방식(method)을 바꿔가며 돌려 비교하므로 실행 단위(match_run)로 묶는다.
+-- 파일 경로·라인은 저장하지 않는다. chunk 조인으로만 얻는다 (원칙1).
+
+CREATE TABLE IF NOT EXISTS match_run (
+    id BIGSERIAL PRIMARY KEY,
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(id) ON DELETE CASCADE,
+    method TEXT NOT NULL CHECK (method IN ('full_context', 'screen_scope')),
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 화면 1개 = LLM 호출 1번. 원문 응답을 남겨야 오답의 원인을 추적할 수 있다.
+CREATE TABLE IF NOT EXISTS match_call (
+    run_id BIGINT NOT NULL REFERENCES match_run(id) ON DELETE CASCADE,
+    screen_id TEXT NOT NULL REFERENCES screen(screen_id) ON DELETE CASCADE,
+    candidate_count INT NOT NULL,
+    error TEXT,
+    raw_output TEXT,
+    usage JSONB,
+    PRIMARY KEY (run_id, screen_id)
+);
+
+-- 근거는 항상 배열 (6장). rank는 LLM이 제시한 순서.
+CREATE TABLE IF NOT EXISTS match_result (
+    run_id BIGINT NOT NULL REFERENCES match_run(id) ON DELETE CASCADE,
+    requirement_id BIGINT NOT NULL REFERENCES requirement(id) ON DELETE CASCADE,
+    chunk_id BIGINT NOT NULL REFERENCES chunk(id) ON DELETE CASCADE,
+    rank INT NOT NULL,
+    PRIMARY KEY (run_id, requirement_id, chunk_id)
+);
+
+-- LLM 출력 검증에서 걸린 것. 조용히 버리지 않고 남긴다.
+--   omitted            요구사항을 응답에서 빠뜨림 (빈 배열과 다르다: 빈 배열은 "근거 없음")
+--   invalid_chunk_id   후보에 없는 chunk_id (원칙1 화이트리스트 위반)
+--   unknown_requirement 요청하지 않은 요구사항 키
+CREATE TABLE IF NOT EXISTS match_issue (
+    id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES match_run(id) ON DELETE CASCADE,
+    screen_id TEXT NOT NULL,
+    requirement_id BIGINT REFERENCES requirement(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('omitted', 'invalid_chunk_id', 'unknown_requirement')),
+    detail JSONB
+);

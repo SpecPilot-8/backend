@@ -1,0 +1,15 @@
+{
+  "_comment": "화면ID -> 진입 파일. 사람이 한 번 정한다 (원칙3: 사람 검수는 기획서 쪽). 팝업 화면은 팝업을 띄우는 화면의 파일로 둔다.",
+  "LOGIN-001": ["src/main/resources/templates/auth/login.html"],
+  "LOGIN-002": ["src/main/resources/templates/auth/signup.html"],
+  "LOGIN-003": ["src/main/resources/templates/auth/password-forgot.html"],
+  "LOGIN-004": ["src/main/resources/templates/auth/password-reset.html"],
+  "NOTICE-001": ["src/main/resources/templates/notice/list.html"],
+  "NOTICE-002": ["src/main/resources/templates/notice/form.html"],
+  "NOTICE-003": ["src/main/resources/templates/notice/form.html"],
+  "NOTICE-004": ["src/main/resources/templates/notice/edit.html"],
+  "NOTICE-005": ["src/main/resources/templates/notice/edit.html"],
+  "NOTICE-006": ["src/main/resources/templates/notice/detail.html"],
+  "MYPAGE-001": ["src/main/resources/templates/mypage/index.html"],
+  "MYPAGE-002": ["src/main/resources/templates/mypage/index.html"]
+}

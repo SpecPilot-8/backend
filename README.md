@@ -1,7 +1,7 @@
 # SpecPilot Backend
 
 기획서-코드 정합성 검증 파이프라인 프로토타입. 지금은 (1) 기획서 파싱 → DB 적재,
-(2) 대조 대상 코드 청킹 → DB 적재 두 단계까지 되어 있다.
+(2) 대조 대상 코드 청킹 → DB 적재, (3) 요구사항 ↔ 청크 매칭(근거 후보 찾기)까지 되어 있다.
 
 ## 배경
 
@@ -37,6 +37,14 @@ python db/load_code.py "<레포 루트>" <repo_id>
 #     python db/load_code.py specpilot_projects_share/specpilot-react react-sample
 ```
 
+```bash
+# 요구사항 ↔ 청크 매칭 (LLM 호출. ANTHROPIC_API_KEY 필요)
+python scripts/run_match.py full_context react-sample       # 기준선: 레포 전체가 후보
+python scripts/run_match.py screen_scope react-sample       # 규칙으로 화면 범위를 좁힌 뒤 선택
+python scripts/compare_scope.py react-sample                # 기준선 근거가 화면 범위 안에 드는지
+python scripts/show_scope.py react-sample LOGIN-001         # 화면 범위 내용 확인 (LLM 없음)
+```
+
 `chunk.file_path`는 레포 루트 기준 상대경로이고, 그 기준점은 `snapshot.root_path`에
 저장된다. 두 값을 합쳐야 실제 파일을 찾을 수 있으므로 루트를 바꿔 적재하면 안 된다.
 
@@ -52,7 +60,8 @@ python db/load_code.py "<레포 루트>" <repo_id>
 
 **코드 청킹** (tree-sitter 기반 AST 파싱)
 - `chunker/java_chunker.py` — 클래스 헤더 / 메서드 / 필드 단위
-- `chunker/js_chunker.py` — 함수·컴포넌트 단위
+- `chunker/js_chunker.py` — 함수·컴포넌트 단위 + 최상위 문장(Express 라우트 등록, 상수 선언).
+  `DOMContentLoaded`처럼 파일 전체를 감싸는 익명 콜백은 모듈 스코프처럼 안쪽을 다시 나눈다
 - `chunker/html_chunker.py` — Thymeleaf 템플릿의 블록(form, table, nav ...) 단위
 - `db/load_code.py` — 소스 트리를 청킹해 `snapshot`/`chunk` 테이블에 적재. git 저장소가
   아니라 파일 해시 트리를 snapshot_id로 씀
@@ -63,6 +72,25 @@ python db/load_code.py "<레포 루트>" <repo_id>
 선언부)만 청크로 남긴다.
 
 - `db/schema.sql` — 전체 테이블 정의
+
+코드를 다시 적재하면 chunk id가 바뀌어 그 snapshot의 매칭 결과(`match_result`)도
+함께 지워진다(FK cascade). 청크가 바뀌면 매칭도 다시 돌려야 하기 때문이다.
+
+**LLM 호출** (`llm/`)
+- 파이프라인은 `llm.get_client()`만 쓴다. 백엔드는 환경변수로 고른다
+  (`SPECPILOT_LLM_PROVIDER`=anthropic, `SPECPILOT_LLM_MODEL`=claude-opus-5 기본).
+  로컬 LLM 백엔드는 아직 없다 — 사용자 PC 사양이 정해지면 `llm/base.py`의 `LLMClient`를 구현해 추가
+
+**요구사항 ↔ 청크 매칭** (`matcher/`)
+- `matcher/select.py` — 후보 청크 중 요구사항별 근거 id를 LLM이 고른다. 응답은 스키마가 맞아도
+  다시 검증한다: 후보에 없는 id, 빠뜨린 요구사항, 모르는 키는 `match_issue`에 남긴다
+- 두 방식은 후보 집합만 다르고 선택 로직은 같다
+  - `full_context` — 레포 청크 전체. 화면마다 후보가 같아 프롬프트 캐시가 걸린다
+  - `screen_scope` — `matcher/scope/`의 규칙으로 좁힌 범위. 진입 파일에서 "이 코드가 쓰는 코드"
+    방향으로만 따라간다 (이름 참조, 뷰 이름→템플릿, 템플릿→스크립트·폼 대상 컨트롤러,
+    React 클라이언트 HTTP 호출→Express 라우트). 링크·리다이렉트는 다른 화면 이동이라 따라가지 않는다
+- 화면ID → 진입 파일 매핑은 `matcher/scope/entries/<repo_id>.json`에 사람이 적는다. 팝업 화면은
+  팝업을 띄우는 화면 파일로 둔다
 
 `req_type`/`verifiable`은 아직 분류 로직이 없어 DB에는 NULL로 들어간다. 다음
 단계(제약조건 정규화)에서 채운다.

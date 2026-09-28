@@ -1,0 +1,15 @@
+{
+  "_comment": "화면ID -> 진입 파일. 사람이 한 번 정한다 (원칙3: 사람 검수는 기획서 쪽). 팝업 화면은 팝업을 띄우는 화면의 파일로 둔다.",
+  "LOGIN-001": ["client/src/pages/auth/LoginPage.jsx"],
+  "LOGIN-002": ["client/src/pages/auth/SignupPage.jsx"],
+  "LOGIN-003": ["client/src/pages/auth/PasswordForgotPage.jsx"],
+  "LOGIN-004": ["client/src/pages/auth/PasswordResetPage.jsx"],
+  "NOTICE-001": ["client/src/pages/notices/NoticeListPage.jsx"],
+  "NOTICE-002": ["client/src/pages/notices/NoticeFormPage.jsx"],
+  "NOTICE-003": ["client/src/pages/notices/NoticeFormPage.jsx"],
+  "NOTICE-004": ["client/src/pages/notices/NoticeFormPage.jsx"],
+  "NOTICE-005": ["client/src/pages/notices/NoticeFormPage.jsx"],
+  "NOTICE-006": ["client/src/pages/notices/NoticeDetailPage.jsx"],
+  "MYPAGE-001": ["client/src/pages/mypage/MyPage.jsx"],
+  "MYPAGE-002": ["client/src/pages/mypage/MyPage.jsx"]
+}

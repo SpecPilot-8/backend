@@ -6,3 +6,4 @@ tree-sitter
 tree-sitter-java
 tree-sitter-javascript
 tree-sitter-html
+anthropic
