@@ -81,18 +81,34 @@ def entry_seeds(g: Graph, entry_files: list[str]) -> set[int]:
 
 
 def reverse_hops(g: Graph, seeds: set[int]) -> set[int]:
-    """진입 컴포넌트를 라우트에 연결하는 청크(AppRouter)를 한 단계만 붙인다.
+    """진입 컴포넌트를 라우트에 연결하는 청크(AppRouter)와, 그 라우트에서 진입
+    컴포넌트를 감싸는 가드(PublicOnlyRoute, ProtectedRoute adminOnly)를 붙인다.
 
-    권한 가드(ProtectedRoute adminOnly)가 여기 걸려 있다. 다만 AppRouter는 모든
-    화면을 참조하므로 여기서 다시 정방향으로 확장하지는 않는다.
+    가드에 "로그인 상태면 로그인 화면 차단", "관리자만 접근" 같은 권한 로직이 있다.
+    AppRouter는 모든 화면을 참조하므로 거기서 정방향으로 확장하지는 않고, 진입
+    컴포넌트와 같은 줄에 있는 컴포넌트만 골라 붙인다.
     """
     names = set()
     for s in seeds:
         names |= defined_names(g.chunks[s])
+    index: dict[str, set[int]] = {}
+    for cid, c in g.chunks.items():
+        if c.file_path.startswith("client/"):
+            for n in defined_names(c):
+                index.setdefault(n, set()).add(cid)
+
     out = set()
     for cid, c in g.chunks.items():
         if cid in seeds or not c.file_path.startswith("client/src/routes/"):
             continue
-        if any(re.search(rf"<{re.escape(n)}\b", c.content) for n in names):
-            out.add(cid)
+        route_lines = [
+            line for line in c.content.splitlines()
+            if any(re.search(rf"<{re.escape(n)}\b", line) for n in names)
+        ]
+        if not route_lines:
+            continue
+        out.add(cid)
+        for line in route_lines:
+            for tag in re.findall(r"<([A-Z][\w$]*)", line):
+                out |= index.get(tag, set()) - seeds
     return out
