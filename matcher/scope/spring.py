@@ -21,8 +21,37 @@ def _view_name(file_path: str) -> str | None:
     return None
 
 
-def _url_index(g: Graph) -> dict[str, set[int]]:
-    """정규화된 URL -> 그 URL을 처리하는 컨트롤러 메서드 청크."""
+# Thymeleaf 링크 식 `@{/notices/{id}/delete(id=${notice.id})}`에서 경로 부분만.
+# 경로 안의 `{id}`를 허용해야 한다. 예전 `[^}(]+`는 `{id`에서 끊겼다.
+_TH_URL = r'@\{((?:[^{}()]|\{[^{}]*\})+)'
+
+
+def _split_method(content: str) -> tuple[str, str]:
+    """메서드 청크를 (어노테이션부, 시그니처)로 나눈다.
+
+    첫 `{`로 자르면 안 된다. `@GetMapping("/notices/{id}")`의 `{`에서 잘려
+    경로가 있는 매핑이 통째로 사라졌다.
+    """
+    m = re.search(r"\b(public|protected|private)\b[^{;]*", content)
+    if m is None:
+        return content, ""
+    return content[:m.start()], m.group(0)
+
+
+def _returns_view(content: str) -> bool:
+    """뷰 이름(또는 redirect)을 반환하는 핸들러인가. 아니면 파일·JSON 응답이다."""
+    annotations, signature = _split_method(content)
+    if "@ResponseBody" in annotations:
+        return False
+    return re.match(r"(public|protected|private)\s+(static\s+)?String\s", signature) is not None
+
+
+def _url_index(g: Graph) -> dict[tuple[str, str], set[int]]:
+    """(HTTP 메서드, 정규화된 URL) -> 그 요청을 처리하는 컨트롤러 메서드 청크.
+
+    메서드를 구분해야 등록 폼의 POST /notices가 목록 화면의 GET /notices(list)를
+    끌어오지 않는다. @RequestMapping(메서드 미지정)은 "*"로 둔다.
+    """
     class_prefix: dict[str, str] = {}
     for c in g.chunks.values():
         if c.chunk_type == "class" and (m := _MAPPING.search(c.content)):
@@ -31,13 +60,19 @@ def _url_index(g: Graph) -> dict[str, set[int]]:
     for cid, c in g.chunks.items():
         if c.chunk_type != "method":
             continue
-        # 메서드 청크 앞부분(어노테이션)만 본다. 본문 문자열에 걸리지 않도록.
-        head = c.content.split("{", 1)[0]
-        for m in _MAPPING.finditer(head):
+        # 어노테이션부만 본다. 본문 문자열에 걸리지 않도록.
+        annotations, _ = _split_method(c.content)
+        for m in _MAPPING.finditer(annotations):
             owner = c.symbol_fqn.rsplit(".", 1)[0]
             url = normalize_url(class_prefix.get(owner, "") + "/" + (m.group(2) or ""))
-            index.setdefault(url, set()).add(cid)
+            verb = "*" if m.group(1) == "Request" else m.group(1).upper()
+            index.setdefault((verb, url), set()).add(cid)
     return index
+
+
+def _handlers(urls: dict[tuple[str, str], set[int]], verb: str, url: str) -> set[int]:
+    url = normalize_url(url)
+    return urls.get((verb, url), set()) | urls.get(("*", url), set())
 
 
 def build_edges(g: Graph, root_path: str) -> None:
@@ -61,15 +96,27 @@ def build_edges(g: Graph, root_path: str) -> None:
             for frag in re.findall(r'~\{\s*([\w/-]+)\s*::', c.content):
                 for t in views.get(frag, ()):
                     g.add(cid, t)
-            # 폼 제출 대상 → 그 URL을 처리하는 컨트롤러. 링크(th:href)는 다른 화면
-            # 이동이므로 따라가지 않는다.
-            for action in re.findall(r'th:action="@\{([^}(]+)', c.content):
-                for t in urls.get(normalize_url(action), ()):
+            # 폼 제출 대상 → 그 요청을 처리하는 컨트롤러 (form의 method 기준, 기본 GET)
+            for form in re.findall(r"<form\b[^>]*>", c.content):
+                action = re.search(r'th:action="' + _TH_URL, form)
+                if action is None:
+                    continue
+                method = re.search(r'\bmethod="(\w+)"', form)
+                verb = method.group(1).upper() if method else "GET"
+                for t in _handlers(urls, verb, action.group(1)):
                     g.add(cid, t)
+            # 링크(th:href)는 대부분 다른 화면 이동이라 따라가지 않는다. 단, 대상이
+            # 화면이 아니라 파일·데이터를 돌려주는 핸들러(첨부 다운로드 등)면 이
+            # 화면에서 일어나는 동작이므로 따라간다.
+            for href in re.findall(r'th:href="' + _TH_URL, c.content):
+                for t in _handlers(urls, "GET", href):
+                    if not _returns_view(g.chunks[t].content):
+                        g.add(cid, t)
         if lang in ("js", "html"):
             # 화면 스크립트의 fetch("/api/...") → 컨트롤러
+            # 메서드 옵션까지 읽지는 않는다. 샘플의 fetch는 모두 GET 조회다.
             for url in re.findall(r'fetch\(\s*[`"\']([^`"\']+)', c.content):
-                for t in urls.get(normalize_url(url), ()):
+                for t in _handlers(urls, "GET", url):
                     g.add(cid, t)
 
 
