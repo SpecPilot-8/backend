@@ -49,6 +49,7 @@ python scripts/run_match.py full_context react-sample       # 기준선: 레포 
 python scripts/run_match.py screen_scope react-sample       # 규칙으로 화면 범위를 좁힌 뒤 선택
 python scripts/compare_scope.py react-sample                # 기준선 근거가 화면 범위 안에 드는지
 python scripts/show_scope.py react-sample LOGIN-001         # 화면 범위 내용 확인 (LLM 없음)
+python scripts/tag_scope.py react-sample                    # 근거마다 이 화면/다른 화면/도달 불가 태그 (LLM 없음)
 ```
 
 `chunk.file_path`는 레포 루트 기준 상대경로이고, 그 기준점은 `snapshot.root_path`에
@@ -95,7 +96,10 @@ python scripts/show_scope.py react-sample LOGIN-001         # 화면 범위 내�
   - `screen_scope` — `matcher/scope/`의 규칙으로 좁힌 범위. 진입 파일에서 "이 코드가 쓰는 코드"
     방향으로만 따라간다 (이름 참조, 뷰 이름→템플릿, 템플릿→스크립트·폼 대상 컨트롤러,
     React 클라이언트 HTTP 호출→Express 라우트). 링크·리다이렉트는 다른 화면 이동이라 따라가지 않는다
-- 화면ID → 진입 파일 매핑은 `matcher/scope/entries/<repo_id>.json`에 사람이 적는다. 팝업 화면은
+- `scripts/tag_scope.py` — full_context 근거가 화면 범위상 어디에 있는지 `match_scope_tag`에 남긴다.
+  전체 투입은 화면이 불러오지도 않는 코드를 근거로 고르는 일이 있어서(예: 마이페이지 토글에 로그인
+  화면용 스크립트), 판정 단계가 `this_screen`이 아닌 근거만으로 구현됨을 내리지 않게 하려는 것
+- - 화면ID → 진입 파일 매핑은 `matcher/scope/entries/<repo_id>.json`에 사람이 적는다. 팝업 화면은
   팝업을 띄우는 화면 파일로 둔다
 
 `req_type`/`verifiable`은 아직 분류 로직이 없어 DB에는 NULL로 들어간다. 다음

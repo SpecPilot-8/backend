@@ -83,20 +83,20 @@ def build_identifier_edges(g: Graph) -> None:
     Java 클래스 참조는 헤더뿐 아니라 그 클래스의 필드까지 연결한다. 폼·DTO의
     `@Size(max = 50)` 같은 제약이 필드에 있기 때문이다 (8.1).
     """
-    index: dict[tuple[str, str], set[int]] = defaultdict(set)  # (lang, name) -> 정의 청크
-    kind_of: dict[tuple[str, str], str] = {}
+    # (lang, name, chunk_type) -> 정의 청크. 종류까지 키에 넣어야 클래스와 그 생성자처럼
+    # 이름이 같은 정의가 서로 덮어쓰지 않는다. 예전엔 PasswordValidator 클래스가
+    # 생성자에 가려져 `PasswordValidator.isValid(`가 클래스 참조로 잡히지 않았다.
+    index: dict[tuple[str, str, str], set[int]] = defaultdict(set)
     class_fields: dict[str, set[int]] = defaultdict(set)  # 클래스 fqn -> 필드 청크
 
     for cid, c in g.chunks.items():
         lang = language(c)
         for name in defined_names(c):
-            index[(lang, name)].add(cid)
-            kind_of[(lang, name)] = c.chunk_type
+            index[(lang, name, c.chunk_type)].add(cid)
         if lang == "java" and c.chunk_type == "field" and "#" in (c.symbol_fqn or ""):
             class_fields[c.symbol_fqn.split("#", 1)[0]].add(cid)
 
-    for (lang, name), targets in index.items():
-        kind = kind_of[(lang, name)]
+    for (lang, name, kind), targets in index.items():
         if lang == "java" and kind == "method":
             pattern = re.compile(rf"(?<![\w$]){re.escape(name)}\s*\(")
         else:

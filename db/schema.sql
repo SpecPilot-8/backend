@@ -114,3 +114,20 @@ CREATE TABLE IF NOT EXISTS match_issue (
     kind TEXT NOT NULL CHECK (kind IN ('omitted', 'invalid_chunk_id', 'unknown_requirement')),
     detail JSONB
 );
+
+-- 매칭 근거가 화면 범위 규칙(matcher/scope)에서 어디에 속하는지. LLM 출력(match_result)과
+-- 섞지 않고 따로 둔다: 규칙을 고치면 LLM 재실행 없이 scripts/tag_scope.py로 다시 계산한다.
+--   this_screen   요구사항이 속한 화면의 범위 안
+--   other_screen  다른 화면의 범위에만 있음 (이동 대상, 또는 기획과 다른 화면에 구현된 기능)
+--   unreachable   어느 화면에서도 도달하지 못함 (쓰이지 않는 코드 후보)
+-- 판정 단계는 this_screen이 아닌 근거만으로 implemented를 내리면 안 된다.
+CREATE TABLE IF NOT EXISTS match_scope_tag (
+    run_id BIGINT NOT NULL,
+    requirement_id BIGINT NOT NULL,
+    chunk_id BIGINT NOT NULL,
+    relation TEXT NOT NULL CHECK (relation IN ('this_screen', 'other_screen', 'unreachable')),
+    other_screens TEXT[],
+    PRIMARY KEY (run_id, requirement_id, chunk_id),
+    FOREIGN KEY (run_id, requirement_id, chunk_id)
+        REFERENCES match_result(run_id, requirement_id, chunk_id) ON DELETE CASCADE
+);

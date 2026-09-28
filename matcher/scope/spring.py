@@ -76,6 +76,7 @@ def _handlers(urls: dict[tuple[str, str], set[int]], verb: str, url: str) -> set
 
 
 def build_edges(g: Graph, root_path: str) -> None:
+    _framework_edges(g)
     urls = _url_index(g)
     views = {v: g.by_file(c.file_path) for c in g.chunks.values() if (v := _view_name(c.file_path))}
 
@@ -120,8 +121,44 @@ def build_edges(g: Graph, root_path: str) -> None:
                     g.add(cid, t)
 
 
+# 엔티티 저장·조회 시점에 JPA가 부르는 메서드. 호출하는 코드가 없어도 쓰인다.
+_JPA_LIFECYCLE = re.compile(r"@(PrePersist|PreUpdate|PreRemove|PostPersist|PostUpdate|PostRemove|PostLoad)\b")
+_BEAN = re.compile(r"@(Service|Component|Repository|Controller|RestController)\b")
+
+
+def _class_of(c) -> str:
+    fqn = c.symbol_fqn or ""
+    return fqn.split("#", 1)[0] if "#" in fqn else fqn.rsplit(".", 1)[0]
+
+
+def _framework_edges(g: Graph) -> None:
+    """엔티티 클래스 → 그 엔티티의 JPA 생명주기 메서드.
+
+    엔티티가 범위에 들어오면(서비스가 Notice를 저장하는 등) 저장 시 자동으로 불리는
+    prePersist도 함께 들어와야 한다. 여기서 createdAt, viewCount 초기값이 정해진다.
+    """
+    headers = {c.symbol_fqn: cid for cid, c in g.chunks.items() if c.chunk_type == "class"}
+    for cid, c in g.chunks.items():
+        if c.chunk_type == "method" and _JPA_LIFECYCLE.search(_split_method(c.content)[0]):
+            if (owner := headers.get(_class_of(c))) is not None:
+                g.add(owner, cid)
+
+
 def global_chunks(g: Graph) -> set[int]:
     out = set()
+    # 레포 밖 인터페이스(UserDetailsService 등)를 구현한 빈의 @Override 메서드는 프레임워크가
+    # 부른다. 호출 코드가 없어서 참조로는 닿지 않으므로 전역으로 둔다. 로그인 시 DB 확인
+    # (CustomUserDetailService.loadUserByUsername)이 여기에 해당한다.
+    defined_types = {(c.symbol_fqn or "").rsplit(".", 1)[-1] for c in g.chunks.values() if c.chunk_type == "class"}
+    spi_classes = set()
+    for c in g.chunks.values():
+        if c.chunk_type == "class" and _BEAN.search(c.content):
+            m = re.search(r"\bimplements\s+([\w\s,<>]+)", c.content)
+            if m and any(t.strip().split("<")[0] not in defined_types for t in m.group(1).split(",")):
+                spi_classes.add(c.symbol_fqn)
+    for cid, c in g.chunks.items():
+        if c.chunk_type == "method" and _class_of(c) in spi_classes and "@Override" in _split_method(c.content)[0]:
+            out.add(cid)
     global_classes = {
         c.symbol_fqn for c in g.chunks.values() if c.chunk_type == "class" and _GLOBAL_CLASS.search(c.content)
     }
