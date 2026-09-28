@@ -4,3 +4,4 @@ specpilot_projects_share/
 .venv/
 __pycache__/
 *.pyc
+.env

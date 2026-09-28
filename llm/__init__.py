@@ -9,11 +9,19 @@
 """
 
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from llm.base import LLMClient, LLMResponse
 
+# 레포 루트의 .env. 실행 위치와 무관하게 찾도록 경로를 고정한다.
+# 셸에 이미 설정된 값이 있으면 그쪽이 이긴다 (override=False).
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
 
 def get_client() -> LLMClient:
+    load_dotenv(_ENV_FILE, override=False)
     provider = os.environ.get("SPECPILOT_LLM_PROVIDER", "anthropic")
     if provider == "anthropic":
         from llm.anthropic_client import AnthropicClient

@@ -22,6 +22,12 @@ createdb specpilot
 psql -d specpilot -f db/schema.sql
 ```
 
+LLM을 쓰는 단계(매칭)는 API 키가 필요하다. `.env`는 `.gitignore`에 들어 있어 커밋되지 않는다.
+
+```bash
+cp .env.example .env    # ANTHROPIC_API_KEY 채우기
+```
+
 ## 실행
 
 ```bash
