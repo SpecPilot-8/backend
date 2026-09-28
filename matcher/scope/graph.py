@@ -46,9 +46,17 @@ def defined_names(c: ChunkRow) -> set[str]:
         if c.chunk_type == "function":
             names.add(name)
         elif c.chunk_type == "statement":
-            # 묶인 문장 청크는 이름이 첫 문장 것뿐이라 선언을 직접 읽는다.
-            # 함수 본문이 아니라 최상위 문장이므로 지역 변수가 섞일 걱정이 없다.
-            names.update(re.findall(rf"\b(?:const|let|var|class)\s+({_IDENT})", c.content))
+            decl = rf"(?:export\s+)?(?:const|let|var|class)\s+({_IDENT})"
+            if re.search(r"\+\d+$", name):
+                # 한 줄 문장 묶음(`emailInput+2`): 청커가 한 줄짜리만 묶으므로 줄마다
+                # 최상위 선언 하나씩이다. 이름엔 첫 문장 것만 있어 줄마다 읽는다.
+                names.update(re.findall(rf"^\s*{decl}", c.content, re.M))
+            else:
+                # 여러 줄 문장 하나: 문장 맨 앞의 선언만 정의다. 본문 전체를 훑으면
+                # 콜백 안쪽 지역 변수(input, button ...)까지 정의로 잡혀, 다른 파일의
+                # 같은 이름 변수와 이어진다 (비밀번호 토글이 공지 화면 범위에 섞였다).
+                if m := re.match(decl, c.content):
+                    names.add(m.group(1))
     return {n for n in names if len(n) >= _MIN_NAME_LEN and n != "<constants>"}
 
 
@@ -114,8 +122,12 @@ def build_identifier_edges(g: Graph) -> None:
                 # `memberService.signup(`처럼 앞에 객체가 붙은 호출은 다른 클래스의
                 # 메서드다. 호출하는 쪽 메서드 이름도 signup이면 예전엔 "자기 정의"로
                 # 보고 통째로 건너뛰어, 컨트롤러→서비스 연결이 끊겼다.
-                qualified = any(c.content[:m.start()].rstrip().endswith(".") for m in matches)
-                unqualified = any(not c.content[:m.start()].rstrip().endswith(".") for m in matches)
+                # 선언부(`public String signup(`)는 호출이 아니다. 이걸 호출로 세면 같은
+                # 이름의 오버로드(GET API용 / POST 폼용 checkPasswordResetTarget)가 서로
+                # 연결되어, API 하나를 따라갔다가 다른 화면의 템플릿까지 번진다.
+                calls = [m for m in matches if not _is_java_declaration(c.content, m.start())]
+                qualified = any(c.content[:m.start()].rstrip().endswith(".") for m in calls)
+                unqualified = any(not c.content[:m.start()].rstrip().endswith(".") for m in calls)
                 resolved = set()
                 if qualified:
                     resolved |= remote
@@ -142,6 +154,22 @@ def build_identifier_edges(g: Graph) -> None:
                 if lang == "java" and tc.chunk_type == "class":
                     for f in class_fields.get(tc.symbol_fqn, ()):
                         g.add(cid, f)
+
+
+_NOT_A_TYPE = {"return", "new", "throw", "else", "case", "yield"}
+
+
+def _is_java_declaration(content: str, pos: int) -> bool:
+    """content[pos:]에서 시작하는 `name(`가 메서드 선언인가.
+
+    선언이면 바로 앞 토큰이 반환 타입(`String`, `List<X>`, `int[]`)이다. 호출이면
+    `=`, `(`, `!`, `.`, `return` 같은 것이 온다.
+    """
+    before = content[:pos].rstrip()
+    if not before or not (before[-1].isalnum() or before[-1] in "_$>]"):
+        return False
+    last = re.search(r"[\w$]+$", before)
+    return not (last and last.group(0) in _NOT_A_TYPE)
 
 
 def normalize_url(path: str) -> str:
