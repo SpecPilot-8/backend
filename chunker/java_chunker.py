@@ -12,6 +12,9 @@ from chunker.models import Chunk
 _LANGUAGE = Language(tsjava.language())
 _PARSER = Parser(_LANGUAGE)
 
+# record는 헤더(`record StoredFile(String a, String b)`)에 필드 정의가 다 들어 있다.
+_TYPE_DECLARATIONS = ("class_declaration", "interface_declaration", "enum_declaration", "record_declaration")
+
 
 def _node_text(node, source: bytes) -> str:
     return source[node.start_byte:node.end_byte].decode("utf-8")
@@ -58,7 +61,25 @@ def chunk_java_file(file_path: str, content: str) -> list[Chunk]:
                 content=header_text,
             ))
 
-        for member in body.children:
+        members = list(body.children)
+        if body.type == "enum_body":
+            # enum 상수(USER, ADMIN)는 헤더 청크(`{` 직전까지)에도, 멤버 청크에도
+            # 안 잡혀 통째로 빠졌다. 권한 요구사항의 근거라 상수 묶음을 청크로 둔다.
+            constants = [m for m in members if m.type == "enum_constant"]
+            if constants:
+                chunks.append(Chunk(
+                    chunk_type="field",
+                    file_path=file_path,
+                    start_line=constants[0].start_point[0] + 1,
+                    end_line=constants[-1].end_point[0] + 1,
+                    symbol_fqn=f"{class_fqn}#<constants>",
+                    content=source[constants[0].start_byte:constants[-1].end_byte].decode("utf-8"),
+                ))
+            for m in members:
+                if m.type == "enum_body_declarations":
+                    members.extend(m.children)
+
+        for member in members:
             if member.type in ("method_declaration", "constructor_declaration"):
                 mname_node = member.child_by_field_name("name")
                 mname = _node_text(mname_node, source) if mname_node else "<init>"
@@ -73,12 +94,12 @@ def chunk_java_file(file_path: str, content: str) -> list[Chunk]:
                         chunks.append(_make_chunk(
                             "field", file_path, member, source, f"{class_fqn}#{fname}"
                         ))
-            elif member.type in ("class_declaration", "interface_declaration", "enum_declaration"):
+            elif member.type in _TYPE_DECLARATIONS:
                 visit_class(member, class_fqn)
 
     def walk_top_level(node):
         for child in node.children:
-            if child.type in ("class_declaration", "interface_declaration", "enum_declaration"):
+            if child.type in _TYPE_DECLARATIONS:
                 visit_class(child, package or "")
             else:
                 walk_top_level(child)
