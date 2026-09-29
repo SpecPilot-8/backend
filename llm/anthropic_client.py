@@ -19,15 +19,20 @@ class AnthropicClient:
         self.effort = effort
         self._client = anthropic.Anthropic()
 
+    @staticmethod
+    def _system(instructions: str, context: str) -> list[dict]:
+        blocks = [{"type": "text", "text": instructions}]
+        # 빈 텍스트 블록은 API가 거부한다. 공유 context가 없는 호출(조건 분해 등)은 빼고 보낸다.
+        if context:
+            # 화면마다 같은 청크 목록을 다시 보내므로 여기까지를 캐시한다.
+            blocks.append({"type": "text", "text": context, "cache_control": {"type": "ephemeral"}})
+        return blocks
+
     def complete_json(self, *, instructions: str, context: str, prompt: str, schema: dict) -> LLMResponse:
         with self._client.messages.stream(
             model=self.model,
             max_tokens=_MAX_TOKENS,
-            system=[
-                {"type": "text", "text": instructions},
-                # 화면마다 같은 청크 목록을 다시 보내므로 여기까지를 캐시한다.
-                {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
-            ],
+            system=self._system(instructions, context),
             messages=[{"role": "user", "content": prompt}],
             output_config={
                 "effort": self.effort,

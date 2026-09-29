@@ -131,3 +131,42 @@ CREATE TABLE IF NOT EXISTS match_scope_tag (
     FOREIGN KEY (run_id, requirement_id, chunk_id)
         REFERENCES match_result(run_id, requirement_id, chunk_id) ON DELETE CASCADE
 );
+
+-- 요구사항을 하위 조건으로 분해한 결과 (라벨 정의서 Q0: 하위 조건 단위로 판정).
+-- LLM이 조건을 나누되, 조건마다 기획서 원문 인용을 붙이고 코드가 원문과 대조한다
+-- (공백은 양쪽 모두 지우고 비교: PDF 추출에서 띄어쓰기가 사라졌기 때문).
+CREATE TABLE IF NOT EXISTS decompose_run (
+    id BIGSERIAL PRIMARY KEY,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE decompose_run ADD COLUMN IF NOT EXISTS usage JSONB;  -- 화면별 호출 사용량 합계
+
+CREATE TABLE IF NOT EXISTS requirement_condition (
+    id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES decompose_run(id) ON DELETE CASCADE,
+    requirement_id BIGINT NOT NULL REFERENCES requirement(id) ON DELETE CASCADE,
+    seq INT NOT NULL,
+    statement TEXT NOT NULL,            -- LLM이 띄어쓰기를 복원해 쓴 조건 문장 (표시·판정 입력용)
+    source_quotes JSONB NOT NULL,       -- [{quote, found}] 원문 인용과 대조 결과. 판정의 기준은 이쪽
+    quotes_verified BOOLEAN NOT NULL,   -- 인용이 전부 원문에 있음
+    verifiable TEXT NOT NULL CHECK (verifiable IN ('code', 'not_statically_verifiable')),
+    verifiable_reason TEXT,
+    UNIQUE (run_id, requirement_id, seq)
+);
+
+-- 사람 검수 큐 (원칙3). 조용히 버리지 않고 남긴다.
+--   quote_not_found      조건의 인용이 원문에 없음 (지어낸 조건 의심)
+--   uncovered_text       원문 중 어떤 조건에도 인용되지 않은 구간 (누락 의심)
+--   omitted              요구사항을 응답에서 빠뜨림
+--   unknown_requirement  요청하지 않은 요구사항 키
+--   llm_error            호출 실패·거절·JSON 오류 (화면 단위, requirement_id 없음)
+CREATE TABLE IF NOT EXISTS decompose_issue (
+    id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES decompose_run(id) ON DELETE CASCADE,
+    requirement_id BIGINT REFERENCES requirement(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('quote_not_found', 'uncovered_text', 'omitted', 'unknown_requirement', 'llm_error')),
+    detail JSONB
+);

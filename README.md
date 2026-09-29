@@ -51,6 +51,7 @@ python scripts/run_match.py screen_scope react-sample       # 규칙으로 화�
 python scripts/compare_scope.py react-sample                # 기준선 근거가 화면 범위 안에 드는지
 python scripts/show_scope.py react-sample LOGIN-001         # 화면 범위 내용 확인 (LLM 없음)
 python scripts/tag_scope.py react-sample                    # 근거마다 이 화면/다른 화면/도달 불가 태그 (LLM 없음)
+python scripts/run_decompose.py                             # 요구사항 → 하위 조건 + verifiable (LLM 호출)
 ```
 
 `chunk.file_path`는 레포 루트 기준 상대경로이고, 그 기준점은 `snapshot.root_path`에
@@ -88,6 +89,13 @@ python scripts/tag_scope.py react-sample                    # 근거마다 이 �
 - 파이프라인은 `llm.get_client()`만 쓴다. 백엔드는 환경변수로 고른다
   (`SPECPILOT_LLM_PROVIDER`=anthropic, `SPECPILOT_LLM_MODEL`=claude-opus-5 기본).
   로컬 LLM 백엔드는 아직 없다 — 사용자 PC 사양이 정해지면 `llm/base.py`의 `LLMClient`를 구현해 추가
+
+**요구사항 → 하위 조건 분해** (`decomposer/`)
+- 판정은 요구사항 번호가 아니라 그 안의 하위 조건 단위로 한다 (`docs/label-definition.md` Q0).
+  LLM이 조건을 나누고 조건마다 `verifiable`(정적 검증 가능 여부)을 붙인다
+- 조건마다 기획서 원문을 그대로 인용하게 하고 코드가 원문과 대조한다(`decomposer/quotes.py`). 공백과
+  PDF 기호 글리프(사용자 정의 영역 문자)는 양쪽에서 지우고 비교한다. 원문에 없는 인용(지어낸 조건 의심),
+  어느 인용에도 안 걸린 원문(누락 의심)은 `decompose_issue`에 남는다
 
 **요구사항 ↔ 청크 매칭** (`matcher/`)
 - `matcher/select.py` — 후보 청크 중 요구사항별 근거 id를 LLM이 고른다. 응답은 스키마가 맞아도
