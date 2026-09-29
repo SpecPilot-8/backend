@@ -10,6 +10,7 @@
 
 import argparse
 import json
+import queue
 import sys
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,7 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from llm import get_client
 from matcher.data import connect, load_chunks, load_screens
-from verdict.judge import PROMPT_VERSION, ConditionInput, ConditionJudgment, input_hash, judge_requirement
+from verdict.judge import (PROMPT_VERSION, ConditionInput, ConditionJudgment, ScreenContext, input_hash,
+                           judge_requirement)
 from verdict.rules import Evidence, aggregate, pre_judge
 
 
@@ -82,20 +84,18 @@ def main() -> None:
         print(f"verdict run {run_id}: {args.repo_id} / match run {match_run} / decompose run {decompose_run} / {client.model}")
 
         # 1) 계획: 규칙 판정과 재사용을 먼저 정하고, LLM이 필요한 요구사항만 작업으로 모은다 (DB는 메인 스레드만 쓴다)
-        plans = []  # (sid, req, ev, judge_ev, results, to_llm)
+        plans = []  # (sid, req, ev, ctx, own, ref, results, to_llm)
         for sid in args.screens or list(screens):
             # LLM 판정에는 같은 화면 요구사항들의 이 화면 근거를 합쳐 넘긴다. 매칭은 요구사항마다
             # 근거를 일부 놓친다 (LOGIN-001-2엔 인증 설정이 안 붙고 같은 화면의 LOGIN-001-E엔 붙었다).
             # 합치지 않으면 그 누락이 곧바로 not_found/partial 오판이 된다.
             screen_primary = list(dict.fromkeys(c for r in screens[sid][1] for c in primary[r.id]))
+            ctx = ScreenContext(sid, screens[sid][0], tuple(screen_primary))
             for req in screens[sid][1]:
                 # 규칙 1~3단계는 요구사항 자기 근거로 판단한다 (Q4-B의 "다른 화면 코드만 있음"은 이 기준).
                 ev = Evidence(tuple(primary[req.id]), tuple(reference[req.id]))
-                own = list(primary[req.id])
-                judge_ev = Evidence(
-                    tuple(own + [c for c in screen_primary if c not in own]),
-                    tuple(c for c in reference[req.id] if c not in screen_primary),
-                )
+                own = tuple(primary[req.id])
+                ref = tuple(c for c in reference[req.id] if c not in screen_primary)
                 invalid = req.id in match_invalid or sid in failed_screens
                 results: dict[int, tuple[ConditionJudgment, str | None, int | None]] = {}
                 to_llm = []
@@ -104,7 +104,7 @@ def main() -> None:
                     if rule is not None:
                         results[cond.id] = (ConditionJudgment(rule.status, rule.reason_kind, rule.reasoning), None, None)
                         continue
-                    h = input_hash(client.model, cond, judge_ev, chunks)
+                    h = input_hash(client.model, ctx, cond, own, ref, chunks)
                     prev = conn.execute("""
                         SELECT id, status, reason_kind, reasoning, message_match, server_validation, spec_suspect
                         FROM condition_verdict WHERE input_hash = %s AND reason_kind = 'llm'
@@ -116,17 +116,17 @@ def main() -> None:
                         results[cond.id] = (ConditionJudgment(prev[1], prev[2], prev[3], ev_ids, prev[4], prev[5], prev[6]), h, prev[0])
                     else:
                         to_llm.append((cond, h))
-                plans.append((sid, req, ev, judge_ev, results, to_llm))
+                plans.append((sid, req, ev, ctx, own, ref, results, to_llm))
 
-        n_calls = sum(1 for p in plans if p[5])
-        print(f"요구사항 {len(plans)}건 중 LLM 호출 {n_calls}건 (동시 {args.workers}개)")
+        n_calls = sum(1 for p in plans if p[7])
+        print(f"요구사항 {len(plans)}건 중 LLM 호출 {n_calls}건 (화면 {args.workers}개씩 동시)")
 
         usage = Counter()
         req_totals = Counter()
         screen_counts: dict[str, Counter] = defaultdict(Counter)
 
         def save(plan) -> None:
-            sid, req, ev, judge_ev, results, _ = plan
+            sid, req, ev, _, _, ref, results, _ = plan
             statuses = []
             for cond, _ in conditions[req.id]:
                 j, h, reused_from = results[cond.id]
@@ -140,7 +140,7 @@ def main() -> None:
                     conn.execute("INSERT INTO condition_verdict_evidence VALUES (%s, %s, 'primary', %s)",
                                  (vid, chunk_id, rank))
                 if j.reason_kind in ("llm", "rule_other_screen_only"):
-                    refs = judge_ev.reference if j.reason_kind == "llm" else ev.reference
+                    refs = ref if j.reason_kind == "llm" else ev.reference
                     for rank, chunk_id in enumerate(refs, start=1):
                         conn.execute("INSERT INTO condition_verdict_evidence VALUES (%s, %s, 'reference', %s)",
                                      (vid, chunk_id, rank))
@@ -154,23 +154,37 @@ def main() -> None:
 
         # 2) LLM이 필요 없는 요구사항은 바로 저장
         for plan in plans:
-            if not plan[5]:
+            if not plan[7]:
                 save(plan)
 
-        # 3) LLM 호출은 동시에. 끝나는 대로 메인 스레드에서 저장한다
-        def run(plan):
-            sid, req, _, judge_ev, _, to_llm = plan
-            return judge_requirement(client, req.stable_key, req.body, [c for c, _ in to_llm],
-                                     judge_ev, chunks, other_screens)
+        # 3) LLM 호출: 화면끼리는 동시에, 한 화면 안에서는 순서대로. 화면 근거 코드는 그 화면의 모든 호출에서
+        #    같아 캐시되는데, 같은 화면을 동시에 부르면 첫 호출이 캐시를 쓰기 전에 모두 시작해 캐시가 안 걸린다.
+        #    결과는 큐로 받아 메인 스레드에서 저장한다 (DB 연결은 스레드끼리 공유하지 않는다).
+        by_screen: dict[str, list] = defaultdict(list)
+        for plan in plans:
+            if plan[7]:
+                by_screen[plan[0]].append(plan)
+        results_q: queue.Queue = queue.Queue()
+
+        def run_screen(screen_plans) -> None:
+            for plan in screen_plans:
+                sid, req, _, ctx, own, ref, _, to_llm = plan
+                try:
+                    out = judge_requirement(client, ctx, req.stable_key, req.body, [c for c, _ in to_llm],
+                                            own, ref, chunks, other_screens)
+                except Exception as e:  # 한 호출이 실패해도 나머지 화면은 계속 간다
+                    out = ({c.id: ConditionJudgment("needs_review", "llm_invalid_output", f"LLM 호출 예외: {e}")
+                            for c, _ in to_llm}, {}, str(e))
+                results_q.put((plan, out))
 
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            futures = {pool.submit(run, p): p for p in plans if p[5]}
-            for i, fut in enumerate(as_completed(futures), start=1):
-                plan = futures[fut]
-                judged, u, err = fut.result()
+            for screen_plans in by_screen.values():
+                pool.submit(run_screen, screen_plans)
+            for i in range(1, n_calls + 1):
+                plan, (judged, u, err) = results_q.get()
                 usage.update({k: v or 0 for k, v in u.items()})
-                for cond, h in plan[5]:
-                    plan[4][cond.id] = (judged[cond.id], h, None)
+                for cond, h in plan[7]:
+                    plan[6][cond.id] = (judged[cond.id], h, None)
                 save(plan)
                 print(f"  [{i}/{n_calls}] {plan[1].stable_key}" + (f" 오류 {err}" if err else ""), flush=True)
 

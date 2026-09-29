@@ -1,6 +1,7 @@
 """판정 순서 4~6단계: 이 화면 근거 코드를 보고 LLM이 조건별 상태를 정한다.
 
 요구사항 하나 = LLM 호출 하나 (그 요구사항의 조건들이 같은 근거를 공유하므로).
+화면의 근거 코드는 그 화면의 모든 요구사항 호출에서 똑같이 쓰이므로 context로 보내 캐시한다.
 LLM은 근거를 후보(primary) 중에서 고르기만 한다 (원칙1). 출력은 형식이 맞아도
 다시 검증하고, 통과하지 못한 조건은 needs_review로 내린다.
 """
@@ -11,9 +12,9 @@ from dataclasses import dataclass, field
 
 from llm import LLMClient
 from matcher.data import ChunkRow
-from verdict.rules import LLM_POLICY, LLM_STATUSES, Evidence
+from verdict.rules import LLM_POLICY, LLM_STATUSES
 
-PROMPT_VERSION = "judge-v3"
+PROMPT_VERSION = "judge-v4"
 
 INSTRUCTIONS = """\
 당신은 화면 기획서의 요구사항 조건이 소스코드에 구현되었는지 판정한다.
@@ -72,13 +73,23 @@ class ConditionJudgment:
     spec_suspect: str | None = None
 
 
-def input_hash(model: str, cond: ConditionInput, ev: Evidence, chunks: dict[int, ChunkRow]) -> str:
+@dataclass(frozen=True)
+class ScreenContext:
+    """한 화면의 판정 공통 입력. 이 화면 근거 코드는 순서까지 고정해야 캐시가 맞는다."""
+    screen_id: str
+    screen_name: str
+    primary: tuple[int, ...]
+
+
+def input_hash(model: str, screen: ScreenContext, cond: ConditionInput, own: tuple[int, ...],
+               reference: tuple[int, ...], chunks: dict[int, ChunkRow]) -> str:
     """같은 조건·같은 근거 코드·같은 프롬프트·같은 모델이면 같은 값. 판정 재사용의 키."""
     h = hashlib.sha256()
     payload = {
-        "prompt": PROMPT_VERSION, "model": model, "statement": cond.statement, "quotes": list(cond.quotes),
-        "primary": [[i, chunks[i].content] for i in sorted(ev.primary)],
-        "reference": [[i, chunks[i].content] for i in sorted(ev.reference)],
+        "prompt": PROMPT_VERSION, "model": model, "screen": [screen.screen_id, screen.screen_name],
+        "statement": cond.statement, "quotes": list(cond.quotes), "own": sorted(own),
+        "primary": [[i, chunks[i].content] for i in sorted(screen.primary)],
+        "reference": [[i, chunks[i].content] for i in sorted(reference)],
     }
     h.update(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
     return h.hexdigest()
@@ -89,26 +100,34 @@ def _render_chunk(tag: str, c: ChunkRow, note: str = "") -> str:
             f"{c.content}\n</{tag}>")
 
 
-def render(req_key: str, req_body: str, conds: list[ConditionInput], ev: Evidence,
-           chunks: dict[int, ChunkRow], other_screens: dict[int, list[str]]) -> str:
-    parts = [f"요구사항 [{req_key}] 원문:\n{req_body}\n", "하위 조건:"]
-    for c in conds:
-        parts.append(f"- id {c.id}: {c.statement}")
-    parts.append("\n이 화면에서 쓰이는 근거 코드:")
-    parts += [_render_chunk("primary", chunks[i]) for i in ev.primary]
-    if ev.reference:
-        parts.append("\n참고: 다른 화면에서만 쓰이는 코드 (이 화면의 구현 근거가 아님):")
-        parts += [_render_chunk("reference", chunks[i], f' screens="{",".join(other_screens.get(i, []))}"')
-                  for i in ev.reference]
+def render_context(screen: ScreenContext, chunks: dict[int, ChunkRow]) -> str:
+    parts = [f"화면 {screen.screen_id} ({screen.screen_name})에서 쓰이는 근거 코드:"]
+    parts += [_render_chunk("primary", chunks[i]) for i in screen.primary]
     return "\n".join(parts)
 
 
-def judge_requirement(client: LLMClient, req_key: str, req_body: str, conds: list[ConditionInput],
-                      ev: Evidence, chunks: dict[int, ChunkRow],
+def render(screen: ScreenContext, req_key: str, req_body: str, conds: list[ConditionInput], own: tuple[int, ...],
+           reference: tuple[int, ...], chunks: dict[int, ChunkRow], other_screens: dict[int, list[str]]) -> str:
+    # 화면 이름이 있어야 LLM이 "삭제 팝업 화면인데 문장은 등록 화면 이야기"처럼 기획서 오류를 알아챈다 (Q7).
+    parts = [f"화면 {screen.screen_id} ({screen.screen_name})의 요구사항 [{req_key}] 원문:\n{req_body}\n", "하위 조건:"]
+    for c in conds:
+        parts.append(f"- id {c.id}: {c.statement}")
+    parts.append(f"\n이 요구사항에 매칭된 근거 id (먼저 볼 것): {list(own)}")
+    parts.append("그 밖의 <primary>도 같은 화면 코드라 근거로 쓸 수 있다.")
+    if reference:
+        parts.append("\n참고: 다른 화면에서만 쓰이는 코드 (이 화면의 구현 근거가 아님):")
+        parts += [_render_chunk("reference", chunks[i], f' screens="{",".join(other_screens.get(i, []))}"')
+                  for i in reference]
+    return "\n".join(parts)
+
+
+def judge_requirement(client: LLMClient, screen: ScreenContext, req_key: str, req_body: str,
+                      conds: list[ConditionInput], own: tuple[int, ...], reference: tuple[int, ...],
+                      chunks: dict[int, ChunkRow],
                       other_screens: dict[int, list[str]]) -> tuple[dict[int, ConditionJudgment], dict, str | None]:
     resp = client.complete_json(
-        instructions=INSTRUCTIONS, context="",
-        prompt=render(req_key, req_body, conds, ev, chunks, other_screens), schema=SCHEMA,
+        instructions=INSTRUCTIONS, context=render_context(screen, chunks),
+        prompt=render(screen, req_key, req_body, conds, own, reference, chunks, other_screens), schema=SCHEMA,
     )
     out: dict[int, ConditionJudgment] = {}
     if resp.data is None:
@@ -116,7 +135,7 @@ def judge_requirement(client: LLMClient, req_key: str, req_body: str, conds: lis
             out[c.id] = ConditionJudgment("needs_review", "llm_invalid_output", f"LLM 호출 실패: {resp.error}")
         return out, resp.usage, resp.error
 
-    allowed_chunks = set(ev.primary)
+    allowed_chunks = set(screen.primary)
     wanted = {c.id for c in conds}
     for item in resp.data.get("conditions", []):
         cid = item.get("condition_id")
