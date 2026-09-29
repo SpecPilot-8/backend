@@ -230,3 +230,17 @@ CREATE TABLE IF NOT EXISTS requirement_verdict (
     status TEXT NOT NULL,
     PRIMARY KEY (verdict_run_id, requirement_id)
 );
+
+-- 골든셋: 사람이 샘플 앱을 실행해 확인한 조건별 정답 (docs/label-definition.md 기준).
+-- 판정(condition_verdict)과 비교해 정확도를 잰다. 조건은 분해 실행에 묶여 있어서, 조건 분해를
+-- 다시 돌리면 조건 id가 바뀌어 이 라벨도 함께 지워진다 (FK cascade).
+CREATE TABLE IF NOT EXISTS golden_label (
+    repo_id TEXT NOT NULL,
+    condition_id BIGINT NOT NULL REFERENCES requirement_condition(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN (
+        'implemented', 'partial', 'mismatch', 'not_found', 'needs_review', 'not_statically_verifiable')),
+    note TEXT,
+    source TEXT,  -- 어느 워크시트에서 가져왔는지
+    labeled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (repo_id, condition_id)
+);
