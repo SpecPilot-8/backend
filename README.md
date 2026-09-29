@@ -52,6 +52,7 @@ python scripts/compare_scope.py react-sample                # 기준선 근거�
 python scripts/show_scope.py react-sample LOGIN-001         # 화면 범위 내용 확인 (LLM 없음)
 python scripts/tag_scope.py react-sample                    # 근거마다 이 화면/다른 화면/도달 불가 태그 (LLM 없음)
 python scripts/run_decompose.py                             # 요구사항 → 하위 조건 + verifiable (LLM 호출)
+python scripts/run_verdict.py spring-sample                  # 조건별 판정 + 요구사항 집계 (LLM 호출)
 ```
 
 `chunk.file_path`는 레포 루트 기준 상대경로이고, 그 기준점은 `snapshot.root_path`에
@@ -96,6 +97,14 @@ python scripts/run_decompose.py                             # 요구사항 → �
 - 조건마다 기획서 원문을 그대로 인용하게 하고 코드가 원문과 대조한다(`decomposer/quotes.py`). 공백과
   PDF 기호 글리프(사용자 정의 영역 문자)는 양쪽에서 지우고 비교한다. 원문에 없는 인용(지어낸 조건 의심),
   어느 인용에도 안 걸린 원문(누락 의심)은 `decompose_issue`에 남는다
+
+**판정** (`verdict/`) — 기준은 `docs/label-definition.md` (잠정 결정)
+- `verdict/rules.py` — 라벨 정의서 기준을 한 곳에 모은 것. 판정 순서 1~3단계(검증 불가, 매칭 검증 실패,
+  이 화면 근거 없음)는 규칙으로 정하고, LLM 정책 문구와 요구사항 단위 집계도 여기 있다. 기준이 바뀌면 이 파일만 고친다
+- `verdict/judge.py` — 4~6단계. 요구사항 하나당 LLM 호출 하나로 조건별 상태를 정한다. 근거는 이 화면 근거
+  (`this_screen`) 후보 중에서만 고르고, 다른 화면 코드는 참고로만 넘긴다. 문구 일치(Q5), 서버 검증 유무(Q6),
+  기획서 의심 사유(Q7)는 상태와 별도 필드로 남긴다
+- 같은 입력(`input_hash`: 조건, 근거 코드, 프롬프트, 모델)의 이전 LLM 판정이 있으면 다시 부르지 않고 재사용한다
 
 **요구사항 ↔ 청크 매칭** (`matcher/`)
 - `matcher/select.py` — 후보 청크 중 요구사항별 근거 id를 LLM이 고른다. 응답은 스키마가 맞아도

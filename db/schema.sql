@@ -174,3 +174,59 @@ CREATE TABLE IF NOT EXISTS decompose_issue (
 -- 본문이 같은(공백 무시) 요구사항은 한 번만 분해하고 조건을 복사한다. 같은 문장이 화면마다
 -- 다르게 나뉘면 판정·골든셋 비교가 어긋나기 때문이다. 복사된 조건은 원본 요구사항을 가리킨다.
 ALTER TABLE requirement_condition ADD COLUMN IF NOT EXISTS copied_from_requirement_id BIGINT REFERENCES requirement(id) ON DELETE CASCADE;
+
+-- 판정 (docs/label-definition.md 잠정 결정 기준).
+-- 하위 조건마다 판정하고(Q0) 요구사항 단위 상태는 규칙으로 집계한다.
+-- 근거 청크는 항상 배열이고 chunk_id만 저장한다. 파일·라인은 조인으로 얻는다 (원칙1, 6장).
+CREATE TABLE IF NOT EXISTS verdict_run (
+    id BIGSERIAL PRIMARY KEY,
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(id) ON DELETE CASCADE,  -- 원칙2: 판정은 특정 시점에 고정
+    match_run_id BIGINT NOT NULL REFERENCES match_run(id) ON DELETE CASCADE,
+    decompose_run_id BIGINT NOT NULL REFERENCES decompose_run(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    usage JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS condition_verdict (
+    id BIGSERIAL PRIMARY KEY,
+    verdict_run_id BIGINT NOT NULL REFERENCES verdict_run(id) ON DELETE CASCADE,
+    condition_id BIGINT NOT NULL REFERENCES requirement_condition(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN (
+        'implemented', 'partial', 'mismatch', 'not_found', 'needs_review', 'not_statically_verifiable')),
+    -- 판정 근거의 종류 (10장: 설명 필드는 판별 유니온). 화면에 다르게 보여야 한다.
+    --   rule_not_verifiable     verifiable = not_statically_verifiable (판정 시도 안 함)
+    --   rule_match_invalid      매칭 단계 LLM 출력 검증 실패
+    --   rule_no_evidence        이 화면 근거 없음 (근거 자체가 없거나 쓰이지 않는 코드뿐)
+    --   rule_other_screen_only  다른 화면 코드만 있음 (Q4-B: 사람이 Q2/Q4 유형을 가림)
+    --   llm                     LLM이 이 화면 근거를 보고 판정
+    --   llm_invalid_output      LLM 출력이 검증을 통과하지 못함
+    reason_kind TEXT NOT NULL,
+    reasoning TEXT,
+    message_match TEXT CHECK (message_match IN ('match', 'differs', 'not_applicable')),       -- Q5
+    server_validation TEXT CHECK (server_validation IN ('present', 'missing', 'not_applicable')),  -- Q6
+    spec_suspect TEXT,                                                                         -- Q7
+    input_hash TEXT,       -- 같은 입력이면 LLM을 다시 부르지 않고 이전 판정을 쓴다
+    reused_from BIGINT REFERENCES condition_verdict(id) ON DELETE SET NULL,
+    UNIQUE (verdict_run_id, condition_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_condition_verdict_input_hash ON condition_verdict(input_hash);
+
+-- role: primary = 이 화면 근거로 판정에 쓴 청크, reference = 다른 화면에 있는 참고 코드
+CREATE TABLE IF NOT EXISTS condition_verdict_evidence (
+    condition_verdict_id BIGINT NOT NULL REFERENCES condition_verdict(id) ON DELETE CASCADE,
+    chunk_id BIGINT NOT NULL REFERENCES chunk(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('primary', 'reference')),
+    rank INT NOT NULL,
+    PRIMARY KEY (condition_verdict_id, chunk_id)
+);
+
+-- 요구사항 단위 상태 = 조건 판정의 집계 (verdict/rules.py의 aggregate)
+CREATE TABLE IF NOT EXISTS requirement_verdict (
+    verdict_run_id BIGINT NOT NULL REFERENCES verdict_run(id) ON DELETE CASCADE,
+    requirement_id BIGINT NOT NULL REFERENCES requirement(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    PRIMARY KEY (verdict_run_id, requirement_id)
+);
