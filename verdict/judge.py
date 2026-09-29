@@ -13,7 +13,7 @@ from llm import LLMClient
 from matcher.data import ChunkRow
 from verdict.rules import LLM_POLICY, LLM_STATUSES, Evidence
 
-PROMPT_VERSION = "judge-v2"
+PROMPT_VERSION = "judge-v3"
 
 INSTRUCTIONS = """\
 당신은 화면 기획서의 요구사항 조건이 소스코드에 구현되었는지 판정한다.

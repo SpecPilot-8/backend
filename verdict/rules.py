@@ -62,7 +62,9 @@ LLM_POLICY = """\
   동작이 없는 것이므로 not_found다. 이때 새 창 여부 같은 세부가 기획서와 다르다는 이유로 mismatch를 주지 않는다.
   mismatch는 동작이 있고 그 세부가 다를 때만 쓴다. (Q3)
 - 메시지 문구: 상태는 동작 기준으로 정한다(조건이 맞을 때 메시지를 보여주는가). 문구가 기획서와 다르기만 하면
-  implemented로 두고 message_match=differs. 조건에 문구가 없으면 not_applicable. (Q5)
+  implemented로 두고 message_match=differs. 조건에 문구가 없으면 not_applicable.
+  단, 기획서가 경우마다 다른 메시지를 요구하는데 코드가 그 경우를 구분하지 못하면(여러 경우에 같은 메시지),
+  문구 문제가 아니라 동작 차이이므로 mismatch다. (Q5)
 - 입력 제한·검증 조건: 화면에서 기획서대로 동작하면 implemented. 서버 쪽 같은 검증이 있으면 server_validation=present,
   없으면 missing. 입력 검증과 무관한 조건은 not_applicable. (Q6)
 - 기획서가 틀렸거나 옛 버전으로 의심되면(코드가 더 그럴듯함, 기획서 앞뒤 모순) 상태는 기획서 기준으로 정하고

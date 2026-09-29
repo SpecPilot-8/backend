@@ -46,6 +46,11 @@ def _returns_view(content: str) -> bool:
     return re.match(r"(public|protected|private)\s+(static\s+)?String\s", signature) is not None
 
 
+def _views_rendered(content: str, views: dict) -> set[str]:
+    """핸들러가 반환하는 뷰 이름. redirect:는 다른 요청으로 넘기는 것이라 넣지 않는다."""
+    return {lit for lit in re.findall(r'"([^"]+)"', content) if lit in views}
+
+
 def _url_index(g: Graph) -> dict[tuple[str, str], set[int]]:
     """(HTTP 메서드, 정규화된 URL) -> 그 요청을 처리하는 컨트롤러 메서드 청크.
 
@@ -105,6 +110,11 @@ def build_edges(g: Graph, root_path: str) -> None:
                 method = re.search(r'\bmethod="(\w+)"', form)
                 verb = method.group(1).upper() if method else "GET"
                 for t in _handlers(urls, verb, action.group(1)):
+                    # GET 폼은 목적지가 다른 화면이면 링크와 같다 (비밀번호 찾기 폼 → 재설정 화면).
+                    # 같은 화면을 다시 그리는 검색·필터 폼은 이 화면의 동작이라 따라간다.
+                    if verb == "GET" and _returns_view(g.chunks[t].content) \
+                            and _view_name(c.file_path) not in _views_rendered(g.chunks[t].content, views):
+                        continue
                     g.add(cid, t)
             # 링크(th:href)는 대부분 다른 화면 이동이라 따라가지 않는다. 단, 대상이
             # 화면이 아니라 파일·데이터를 돌려주는 핸들러(첨부 다운로드 등)면 이
