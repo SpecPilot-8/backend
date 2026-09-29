@@ -170,3 +170,7 @@ CREATE TABLE IF NOT EXISTS decompose_issue (
     kind TEXT NOT NULL CHECK (kind IN ('quote_not_found', 'uncovered_text', 'omitted', 'unknown_requirement', 'llm_error')),
     detail JSONB
 );
+
+-- 본문이 같은(공백 무시) 요구사항은 한 번만 분해하고 조건을 복사한다. 같은 문장이 화면마다
+-- 다르게 나뉘면 판정·골든셋 비교가 어긋나기 때문이다. 복사된 조건은 원본 요구사항을 가리킨다.
+ALTER TABLE requirement_condition ADD COLUMN IF NOT EXISTS copied_from_requirement_id BIGINT REFERENCES requirement(id) ON DELETE CASCADE;
