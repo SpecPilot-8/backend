@@ -8,3 +8,4 @@ tree-sitter-javascript
 tree-sitter-html
 anthropic
 python-dotenv
+openpyxl

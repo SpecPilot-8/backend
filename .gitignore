@@ -5,3 +5,4 @@ specpilot_projects_share/
 __pycache__/
 *.pyc
 .env
+output/
