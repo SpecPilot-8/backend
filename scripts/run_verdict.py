@@ -84,8 +84,18 @@ def main() -> None:
         for sid in args.screens or list(screens):
             screen_counts = Counter()
             calls = reused = 0
+            # LLM 판정에는 같은 화면 요구사항들의 이 화면 근거를 합쳐 넘긴다. 매칭은 요구사항마다
+            # 근거를 일부 놓친다 (LOGIN-001-2엔 인증 설정이 안 붙고 같은 화면의 LOGIN-001-E엔 붙었다).
+            # 합치지 않으면 그 누락이 곧바로 not_found/partial 오판이 된다.
+            screen_primary = list(dict.fromkeys(c for r in screens[sid][1] for c in primary[r.id]))
             for req in screens[sid][1]:
+                # 규칙 1~3단계는 요구사항 자기 근거로 판단한다 (Q4-B의 "다른 화면 코드만 있음"은 이 기준).
                 ev = Evidence(tuple(primary[req.id]), tuple(reference[req.id]))
+                own = list(primary[req.id])
+                judge_ev = Evidence(
+                    tuple(own + [c for c in screen_primary if c not in own]),
+                    tuple(c for c in reference[req.id] if c not in screen_primary),
+                )
                 invalid = req.id in match_invalid or sid in failed_screens
                 results: dict[int, tuple[ConditionJudgment | object, str | None, int | None]] = {}
                 to_llm = []
@@ -94,7 +104,7 @@ def main() -> None:
                     if rule is not None:
                         results[cond.id] = (ConditionJudgment(rule.status, rule.reason_kind, rule.reasoning), None, None)
                         continue
-                    h = input_hash(client.model, cond, ev, chunks)
+                    h = input_hash(client.model, cond, judge_ev, chunks)
                     prev = conn.execute("""
                         SELECT id, status, reason_kind, reasoning, message_match, server_validation, spec_suspect
                         FROM condition_verdict WHERE input_hash = %s AND reason_kind = 'llm'
@@ -109,7 +119,7 @@ def main() -> None:
                         to_llm.append((cond, h))
                 if to_llm:
                     judged, u, _ = judge_requirement(client, req.stable_key, req.body, [c for c, _ in to_llm],
-                                                     ev, chunks, other_screens)
+                                                     judge_ev, chunks, other_screens)
                     usage.update({k: v or 0 for k, v in u.items()})
                     calls += 1
                     for cond, h in to_llm:
@@ -128,7 +138,8 @@ def main() -> None:
                         conn.execute("INSERT INTO condition_verdict_evidence VALUES (%s, %s, 'primary', %s)",
                                      (vid, chunk_id, rank))
                     if j.reason_kind in ("llm", "rule_other_screen_only"):
-                        for rank, chunk_id in enumerate(ev.reference, start=1):
+                        refs = judge_ev.reference if j.reason_kind == "llm" else ev.reference
+                        for rank, chunk_id in enumerate(refs, start=1):
                             conn.execute("INSERT INTO condition_verdict_evidence VALUES (%s, %s, 'reference', %s)",
                                          (vid, chunk_id, rank))
                     statuses.append(j.status)
