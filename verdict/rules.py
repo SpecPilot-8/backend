@@ -29,7 +29,8 @@ def pre_judge(verifiable: str, match_invalid: bool, ev: Evidence) -> RuleVerdict
     # 1. 정적으로 검증할 수 없는 조건은 판정을 시도하지 않는다 (Q8-A)
     if verifiable == "not_statically_verifiable":
         return RuleVerdict("not_statically_verifiable", "rule_not_verifiable",
-                           "시각 스타일이나 브라우저 제공 동작이라 코드만으로 확인할 수 없다")
+                           "화면을 봐야 알 수 있는 조건(시각 스타일, 화면상 위치, CSS가 그리는 상태 표시, "
+                           "브라우저 제공 동작)이라 코드만으로 확인할 수 없다")
     # 2. 매칭 단계 출력이 검증을 통과하지 못했으면 근거 목록을 믿을 수 없다
     if match_invalid:
         return RuleVerdict("needs_review", "rule_match_invalid", "근거 매칭 결과에 검증 이슈가 있다")
@@ -68,6 +69,9 @@ LLM_POLICY = """\
   implemented로 두고 message_match=differs. 조건에 문구가 없으면 not_applicable.
   단, 기획서가 경우마다 다른 메시지를 요구하는데 코드가 그 경우를 구분하지 못하면(여러 경우에 같은 메시지),
   문구 문제가 아니라 동작 차이이므로 mismatch다. (Q5)
+- 표시 방식: 기획서가 팝업(모달·알림창·confirm/alert 창)으로 보여주라고 한 것을 코드가 화면 안 문구(입력란 아래
+  메시지, 페이지 안 경고 영역 등)로 보여주면, 또는 그 반대면, 문구가 같아도 표시 방식이 다른 것이므로 mismatch다.
+  문구 차이(Q5)와 구분한다. reasoning에 기획서의 표시 방식과 코드의 표시 방식을 함께 쓴다. (Q5 보완: 표시 방식)
 - 입력 제한·검증 조건: 화면에서 기획서대로 동작하면 implemented. 서버 쪽 같은 검증이 있으면 server_validation=present,
   없으면 missing. 입력 검증과 무관한 조건은 not_applicable. (Q6)
 - 기획서가 틀렸거나 옛 버전으로 의심되면(코드가 더 그럴듯함, 기획서 앞뒤 모순) 상태는 기획서 기준으로 정하고

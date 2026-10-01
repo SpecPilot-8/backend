@@ -244,3 +244,19 @@ CREATE TABLE IF NOT EXISTS golden_label (
     labeled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (repo_id, condition_id)
 );
+
+-- verifiable 재분류 기록 (scripts/reclassify_verifiable.py).
+-- 분해를 다시 돌리면 조건 id가 바뀌어 골든셋이 끊기므로, 기준만 바뀌었을 때는 기존 조건의 verifiable을
+-- 제자리에서 고친다. 무엇이 언제 어떤 기준으로 바뀌었는지 여기 남긴다. 판정 실행은 그 시점의 condition_verdict에
+-- 결과를 따로 저장하므로, 이전 판정 실행의 채점은 재분류의 영향을 받지 않는다.
+CREATE TABLE IF NOT EXISTS verifiable_change (
+    id BIGSERIAL PRIMARY KEY,
+    condition_id BIGINT NOT NULL REFERENCES requirement_condition(id) ON DELETE CASCADE,
+    old_value TEXT NOT NULL,
+    new_value TEXT NOT NULL,
+    old_reason TEXT,
+    new_reason TEXT,
+    prompt_version TEXT NOT NULL,   -- decomposer/decompose.py PROMPT_VERSION (기준 문장 버전)
+    model TEXT NOT NULL,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

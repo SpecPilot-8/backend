@@ -149,13 +149,24 @@ def import_(args) -> None:
 
 
 def score(args) -> None:
+    """판정을 시도한 조건만 채점하고, 판정 범위 밖으로 뺀 조건은 따로 보고한다.
+
+    not_statically_verifiable로 분류된 조건은 도구가 판정하지 않겠다고 한 것이라 정확도에 넣지 않는다.
+    대신 그중 실제 결함(정답이 implemented가 아닌 것)이 몇 개인지 같이 보여준다. 결함을 범위 밖으로
+    빼서 점수가 오르는 효과가 숨겨지지 않게 하기 위해서다.
+    """
+    pinned = dict(r.split("=") for r in args.runs or [])
     with connect() as conn:
         for repo, label in REPOS:
-            runs = _full_runs(conn, repo)
-            if not runs:
-                print(f"{label}: 전체 판정 없음")
-                continue
-            run = runs[0]
+            if repo in pinned:
+                run = int(pinned[repo])
+            else:
+                runs = _full_runs(conn, repo)
+                if not runs:
+                    print(f"{label}: 전체 판정 없음")
+                    continue
+                run = runs[0]
+            prompt = conn.execute("SELECT prompt_version FROM verdict_run WHERE id = %s", (run,)).fetchone()[0]
             pairs = conn.execute("""
                 SELECT g.status, v.status, q.stable_key, rc.statement
                 FROM golden_label g
@@ -166,17 +177,31 @@ def score(args) -> None:
             if not pairs:
                 print(f"{label} (판정 실행 {run}): 정답이 아직 없다")
                 continue
-            hit = sum(g == v for g, v, _, _ in pairs)
-            print(f"\n{label} (판정 실행 {run}): 정답 {len(pairs)}개 중 {hit}개 일치 = {hit / len(pairs):.0%}")
+            skipped = [p for p in pairs if p[1] == "not_statically_verifiable"]
+            judged = [p for p in pairs if p[1] != "not_statically_verifiable"]
+            hit = sum(g == v for g, v, _, _ in judged)
+            print(f"\n{label} (판정 실행 {run}, {prompt}): 정답 {len(pairs)}개 중 판정 시도 {len(judged)}개, "
+                  f"일치 {hit}개 = {hit / len(judged):.0%}")
+            skipped_defects = sum(1 for g, _, _, _ in skipped if g != "implemented")
+            print(f"  판정 범위 밖(not_statically_verifiable) {len(skipped)}개, 그중 실제 결함 {skipped_defects}개")
+
+            # 결함인가 아닌가만 본 결과. 정답 implemented = 정상, 그 밖은 결함
+            defect = [p for p in judged if p[0] != "implemented"]
+            ok = [p for p in judged if p[0] == "implemented"]
+            caught = sum(1 for _, v, _, _ in defect if v not in ("implemented", "needs_review"))
+            passed = sum(1 for _, v, _, _ in defect if v == "implemented")
+            false_alarm = sum(1 for _, v, _, _ in ok if v not in ("implemented", "needs_review"))
+            print(f"  결함 {len(defect)}개 → 잡음 {caught}, 정상으로 통과 {passed}, needs_review {len(defect) - caught - passed}")
+            print(f"  정상 {len(ok)}개 → 결함으로 경보 {false_alarm}")
 
             # 상태별 재현율: 정답이 X인 것 중 판정도 X인 비율. 특히 mismatch·not_found를 놓치지 않는지가 중요하다 (9장)
-            by_gold = Counter(g for g, _, _, _ in pairs)
+            by_gold = Counter(g for g, _, _, _ in judged)
             for st in STATUSES:
                 if by_gold[st]:
-                    ok = sum(1 for g, v, _, _ in pairs if g == st and v == st)
-                    print(f"  정답 {st:<26} {by_gold[st]:>3}개 → 판정도 같음 {ok}개")
-            wrong = [(k, s, g, v) for g, v, k, s in pairs if g != v]
-            if wrong:
+                    same = sum(1 for g, v, _, _ in judged if g == st and v == st)
+                    print(f"  정답 {st:<26} {by_gold[st]:>3}개 → 판정도 같음 {same}개")
+            wrong = [(k, s, g, v) for g, v, k, s in judged if g != v]
+            if wrong and args.verbose:
                 print("  틀린 판정:")
                 for k, s, g, v in wrong:
                     print(f"    {k} 정답 {g} / 판정 {v} — {s[:50]}")
@@ -190,7 +215,9 @@ def main() -> None:
     w.add_argument("--out")
     i = sub.add_parser("import")
     i.add_argument("file")
-    sub.add_parser("score")
+    s = sub.add_parser("score")
+    s.add_argument("--runs", nargs="*", help="채점할 판정 실행 고정. 예: spring-sample=11 react-sample=12 (기본: 레포별 최근 전체 판정)")
+    s.add_argument("-v", "--verbose", action="store_true", help="틀린 판정 목록까지 출력")
     args = ap.parse_args()
     {"worksheet": worksheet, "import": import_, "score": score}[args.cmd](args)
 

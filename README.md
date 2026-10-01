@@ -41,7 +41,7 @@ flowchart LR
 | 1 ~ 5 | 완료. 씽크트리 샘플(Spring, React) 기준으로 실행 결과가 DB에 있음 |
 | 6 판정 | 두 레포 전체 실행 완료. 다만 재실행 시 약 14%가 바뀔 만큼 흔들림 |
 | 7 출력 | 요구사항 추적표 완료. 씽크트리 견본 형식의 테스트 사양서는 미착수 (시험절차·계정·입력값 생성 필요) |
-| 정확도 평가 (골든셋) | 도구 완료 (`scripts/golden.py`). 정답은 아직 0개. 판정이 흔들린 56개 조건부터 확인 |
+| 정확도 평가 (골든셋) | 두 레포 전체 480개 조건 정답 완료(샘플 앱 실행 확인). 점수는 `docs/golden-score.md` |
 | 로컬 LLM 전환 | 미착수. 사용자 PC 사양·모델 미정 |
 
 ## 설치
@@ -84,6 +84,8 @@ python scripts/tag_scope.py spring-sample
 
 # 5. 조건 분해 (레포와 무관, 기획서 기준 한 번)
 python scripts/run_decompose.py
+# (verifiable 기준만 바뀌었을 때: 분해 대신 기존 조건만 재분류. 골든셋 연결 유지)
+python scripts/reclassify_verifiable.py --dry-run
 
 # 6. 판정 (레포마다, 3·4·5의 최근 실행을 입력으로 씀)
 python scripts/run_verdict.py spring-sample
@@ -197,14 +199,21 @@ LLM 단계는 실행마다 비용이 든다. 샘플 기준 매칭 약 $0.5~0.6 (
 python scripts/golden.py worksheet          # 확인용 엑셀 (기본: 최근 두 전체 판정에서 결과가 바뀐 조건)
 # 엑셀의 노란 "정답" 칸을 채운다 (안내 시트에 앱 실행법·계정·기준이 있음)
 python scripts/golden.py import output/golden_worksheet_<날짜>.xlsx
-python scripts/golden.py score              # 레포별 최근 전체 판정의 일치율, 상태별 결과, 틀린 판정 목록
+python scripts/golden.py score              # 레포별 최근 전체 판정의 일치율, 결함 검출, 상태별 결과 (-v: 틀린 판정 목록)
+python scripts/golden.py score --runs spring-sample=11 react-sample=12   # 특정 판정 실행 채점
 ```
 
+- 채점은 판정을 시도한 조건만 대상으로 한다. `not_statically_verifiable`로 분류된 조건은 따로 세고,
+  그중 실제 결함 수를 함께 출력한다 (결함을 범위 밖으로 빼서 점수가 오르는 효과가 숨지 않게)
+- 점수 기록은 `docs/golden-score.md`
 - 정답에는 `needs_review`를 쓰지 않는다. 기능이 기획과 다른 화면에 있으면 `mismatch`, 없으면 `not_found`
 - 이미 정답이 있는 조건은 다음 워크시트에 다시 나오지 않는다. `--all`이면 전체 조건
 - 정답은 `golden_label` 테이블에 쌓인다. 조건 분해를 다시 돌리면 새 조건이 새 id로 추가되고 판정도 새 조건을 쓴다.
   이전 정답은 지워지지 않지만 새 판정과 연결이 끊겨 채점에 안 잡히니, 정답을 채운 뒤에는 분해를 다시 돌리지 말 것
   (원문 인용 기준으로 정답을 새 조건에 옮기는 기능은 아직 없다)
+- verifiable 기준만 바뀌었을 때는 분해를 다시 돌리지 말고 `scripts/reclassify_verifiable.py`로 기존 조건의
+  verifiable만 다시 매긴다 (`--dry-run`으로 먼저 확인). 바뀐 내역은 `verifiable_change` 테이블에 남는다.
+  골든셋은 읽지 않는다
 
 ## 디렉터리
 
