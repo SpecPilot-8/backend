@@ -1,6 +1,8 @@
+from dataclasses import replace
 from io import BytesIO
 
 import pymupdf
+import pytest
 from docx import Document
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
@@ -63,6 +65,68 @@ def pdf_bytes(text=True):
     result = document.tobytes()
     document.close()
     return result
+
+
+@pytest.mark.parametrize("filename,content,kind", [
+    ("plan.docx", docx_bytes, "paragraph"), ("plan.xlsx", xlsx_bytes, "cell"), ("plan.pdf", pdf_bytes, "text"),
+])
+def test_document_parsers(client, project, filename, content, kind):
+    result = client.post("/api/spec/parse", data=params(project), files={"file": (filename, content())})
+    assert result.status_code == 201, result.text
+    doc = result.json()
+    assert doc["blocks"][0]["kind"] == kind
+    assert doc["pipeline_status"] == "awaiting_ai" and doc["missing_features"]
+    assert "location" in doc["blocks"][0]
+    if filename.endswith("docx"):
+        assert doc["blocks"][1]["rows"] == [["REQ-001", "잠금"]]
+    if filename.endswith("xlsx"):
+        assert doc["blocks"][1]["text"] == "=1+1"
+    listed = client.get("/api/v1/documents", params=params(project)).json()
+    assert listed["total"] == 1
+    details = client.get(f"/api/v1/documents/{doc['id']}", params=params(project)).json()
+    assert details["text"] == doc["text"]
+    extraction = client.post(f"/api/v1/documents/{doc['id']}/requirements/extract", params=params(project))
+    assert extraction.status_code == 202 and extraction.json()["status"] == "blocked"
+    assert client.get("/api/v1/requirements", params=params(project)).json()["total"] == 0
+
+
+def test_scanned_pdf_warns_without_fake_text(client, project):
+    response = client.post("/api/v1/documents/parse", data=params(project),
+                           files={"file": ("scan.pdf", pdf_bytes(False))})
+    assert response.status_code == 201
+    assert response.json()["text"] == "" and response.json()["blocks"] == []
+    assert any("OCR" in warning for warning in response.json()["warnings"])
+
+
+@pytest.mark.parametrize("filename,data,status", [
+    ("bad.docx", b"broken", 422), ("bad.pdf", b"broken", 422), ("bad.xlsx", b"broken", 422),
+    ("plan.txt", b"text", 415), ("empty.docx", b"", 422),
+])
+def test_invalid_upload_not_saved(client, project, config, filename, data, status):
+    result = client.post("/api/spec/parse", data=params(project), files={"file": (filename, data)})
+    assert result.status_code == status
+    assert list((config.data_dir / "uploads").iterdir()) == []
+    assert client.get("/api/v1/documents", params=params(project)).json()["total"] == 0
+
+
+def test_upload_size_limit(config):
+    settings = replace(config, max_upload_bytes=4)
+    with TestClient(create_app(settings)) as client:
+        project = client.post("/api/v1/projects", json={"name": "small", "workspace_path": str(config.workspace_root)}).json()
+        response = client.post("/api/spec/parse", data=params(project), files={"file": ("file.pdf", b"12345")})
+        assert response.status_code == 413
+        assert list((config.data_dir / "uploads").iterdir()) == []
+
+
+def test_duplicate_rollback_pagination_and_filter(client, project, requirement):
+    body = {"project_id": project["id"], "req_id": "REQ-001", "title": "duplicate"}
+    assert client.post("/api/v1/requirements", json=body).status_code == 409
+    body["req_id"] = "REQ-002"
+    assert client.post("/api/v1/requirements", json=body).status_code == 201
+    response = client.get("/api/v1/requirements", params={**params(project), "limit": 1, "offset": 1}).json()
+    assert response["total"] == 2 and response["items"][0]["req_id"] == "REQ-002"
+    assert client.get("/api/v1/requirements", params={**params(project), "q": "계정"}).json()["total"] == 1
+    assert client.get("/api/v1/requirements", params={**params(project), "limit": 0}).status_code == 422
 
 
 def test_core_project_persistence_and_routes(client, config, project):
