@@ -7,7 +7,9 @@
 
 ## FastAPI 서버
 
-Python 3.11 이상에서 실행한다. 기존 CLI 엔진 옆에 프로젝트별 HTTP API를 기능별로 추가한다.
+Python 3.11 이상에서 실행한다. 기존 분석 엔진 옆에 `api/`, `services/`를 추가했다.
+프로젝트 등록, DOCX·PDF·XLSX 텍스트 추출, 코드 스냅샷, 수동 요구사항·판정·테스트 케이스,
+진단·대시보드·추적표, XLSX 출력이 동작한다. 일본어 번역은 포함하지 않는다.
 
 ```bash
 python3 -m venv .venv
@@ -16,21 +18,23 @@ pip install -r requirements-dev.txt
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Swagger: <http://127.0.0.1:8000/docs>. 현재 연결된 기능은 `/api/v1/capabilities`에서 확인한다.
-기본 DB는 `.data/api.sqlite3`이며 `SPECPILOT_DATABASE_URL`로 PostgreSQL URL을 설정할 수 있다.
-업로드 원본은 `.data/uploads/`에 저장한다. `SPECPILOT_WORKSPACE_ROOT`로 허용 프로젝트 루트를 지정한다.
-AI 호출은 연결하지 않았으며 키를 저장하지 않는다. 일본어 번역과 다중 모델 지원은 제외한다.
-API의 `api_*` 테이블은 기존 CLI 샘플 테이블과 분리한다. 현재는 로컬 개발용이며 인증·운영 마이그레이션은 미구현이다.
+- Swagger: <http://127.0.0.1:8000/docs>, OpenAPI: <http://127.0.0.1:8000/openapi.json>
+- 기본 저장소: `.data/api.sqlite3`, 업로드 원본: `.data/uploads/`. 서버 재시작 후에도 유지된다.
+- 프로젝트 경로는 기본적으로 이 레포의 상위 디렉터리 안에서만 등록할 수 있다.
+  다른 개발 폴더는 `SPECPILOT_WORKSPACE_ROOT`로 허용 루트를 지정한다.
+- AI 분석 요청은 `202`와 `status: blocked`, `missing_features`를 반환한다.
+  요구사항 자동 추출·자동 판정·수정 코드·테스트 케이스를 생성한 것처럼 응답하지 않는다.
+- 프로젝트마다 모델 설정 하나를 보관한다. API 키는 저장하지 않으며 연결 확인은 아직 `501`이다.
+  키 교체로 제공자를 전환하는 다중 모델 기능은 후속 확장이다.
 
-현재 구현 범위:
+기능별 구현 범위, 요청 예시와 연동 순서는 [API 구현 명세](docs/API_IMPLEMENTATION.md)를 참고한다.
+기존 CLI의 샘플 데이터와 API 데이터는 분리되어 있다. 기존 matcher·decomposer·verdict를
+HTTP 작업으로 실행하는 어댑터는 아직 연결하지 않았다.
 
-- [FastAPI 서버와 프로젝트 관리 기반 추가](docs/api-core.md)
-- [기획서 파싱과 요구사항 관리 API 추가](docs/spec-api.md)
-- [코드 스냅샷과 근거 청크 조회 API 추가](docs/code-snapshots.md)
-- [검증 작업과 수동 판정 및 진단 API 추가](docs/verification-api.md)
-- [테스트 케이스와 대시보드 및 엑셀 출력 API 추가](docs/test-report-api.md)
-
-검증: `python -m pytest -q`, `python -m ruff check api services tests`.
+```bash
+python -m pytest -q
+python -m ruff check api services tests
+```
 
 ## 기존 CLI 분석 엔진의 파이프라인
 

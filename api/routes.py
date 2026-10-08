@@ -14,8 +14,8 @@ from api.errors import APIError
 from api.models import CodeChunk, Document, Job, Project, Requirement, Snapshot, TestCase, VerificationResult
 from api.models import new_id, now
 from api.schemas import (
-    Capability, ChunkOut, CodeIndexRequest, DocumentDetail, DocumentOut, ExportRequest,
-    GenerateTestsRequest, JobOut, Page, ProjectCreate, ProjectOut, RequirementCreate,
+    Capability, ChunkOut, CodeIndexRequest, ConnectionCheck, DocumentDetail, DocumentOut, ExportRequest,
+    GenerateTestsRequest, JobOut, LLMSettings, Page, ProjectCreate, ProjectOut, RequirementCreate,
     RequirementOut, RequirementSpec, ReverifyRequest, SnapshotOut, TestCaseCreate, TestCaseOut,
     VerificationImport, VerificationOut, VerifyRequest,
 )
@@ -451,3 +451,30 @@ def export_traceability(body: ExportRequest, db: DB):
     snapshot, rows = queries.requirements_with_results(db, project.id, body.snapshot_id)
     return download(exports.traceability(project, snapshot,
                     [(req, queries.verification_out(db, result)) for req, result in rows]), "traceability.xlsx")
+
+
+@router.get("/api/v1/projects/{project_id}/llm", tags=["settings"])
+def llm_settings(project_id: str, db: DB):
+    project = get_entity(db, Project, project_id)
+    return {"config": project.llm_config, "config_version": project.config_version,
+            "connection_status": "not_connected", "model_limit": 1, "api_key_storage": "client_secret_storage"}
+
+
+@router.put("/api/v1/projects/{project_id}/llm", tags=["settings"])
+def set_llm_settings(project_id: str, body: LLMSettings, db: DB):
+    project = get_entity(db, Project, project_id)
+    if project.llm_config and (body.provider != project.llm_config["provider"] or
+                               body.model != project.llm_config["model"]):
+        features.not_implemented("multi_model")
+    value = body.model_dump()
+    if project.llm_config != value:
+        project.llm_config = value
+        project.config_version += 1
+    db.commit()
+    return llm_settings(project_id, db)
+
+
+@router.post("/api/v1/projects/{project_id}/llm/connection-check", tags=["settings"])
+def check_connection(project_id: str, body: ConnectionCheck, db: DB):
+    get_entity(db, Project, project_id)
+    features.not_implemented("llm_connection")
