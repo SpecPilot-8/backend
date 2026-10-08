@@ -1,8 +1,9 @@
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -10,14 +11,16 @@ from sqlalchemy.orm import Session
 from api.config import Settings
 from api.dependencies import get_entity, session, settings
 from api.errors import APIError
-from api.models import CodeChunk, Document, Job, Project, Requirement, Snapshot, VerificationResult
+from api.models import CodeChunk, Document, Job, Project, Requirement, Snapshot, TestCase, VerificationResult
 from api.models import new_id, now
 from api.schemas import (
-    Capability, ChunkOut, CodeIndexRequest, DocumentDetail, DocumentOut, JobOut, Page, ProjectCreate, ProjectOut, RequirementCreate,
-    RequirementOut, RequirementSpec, ReverifyRequest, SnapshotOut, VerificationImport, VerificationOut, VerifyRequest,
+    Capability, ChunkOut, CodeIndexRequest, DocumentDetail, DocumentOut, ExportRequest,
+    GenerateTestsRequest, JobOut, Page, ProjectCreate, ProjectOut, RequirementCreate,
+    RequirementOut, RequirementSpec, ReverifyRequest, SnapshotOut, TestCaseCreate, TestCaseOut,
+    VerificationImport, VerificationOut, VerifyRequest,
 )
 from services import capabilities as features
-from services import code, documents, queries, workflow
+from services import code, documents, exports, queries, workflow
 
 from services.workspace import workspace_path
 
@@ -339,6 +342,28 @@ def get_fix(requirement_id: str, project_id: str, db: DB, snapshot_id: str | Non
             "evidence": queries.evidence_out(db, result), "application_status": "suggestion_only"}
 
 
+@router.get("/api/v1/traceability", response_model=Page[RequirementOut], tags=["results"])
+def traceability(project_id: str, db: DB, snapshot_id: str | None = None,
+                  limit: Limit = 50, offset: Offset = 0):
+    return list_requirements(project_id, db, snapshot_id, limit=limit, offset=offset)
+
+
+@router.get("/api/v1/projects/{project_id}/dashboard", tags=["results"])
+def dashboard(project_id: str, db: DB, snapshot_id: str | None = None):
+    snapshot, rows = queries.requirements_with_results(db, project_id, snapshot_id)
+    counts = Counter(r.status if r else "not_run" for _, r in rows)
+    for status in ("implemented", "partial", "mismatch", "not_found", "needs_review",
+                   "not_statically_verifiable", "not_run"):
+        counts.setdefault(status, 0)
+    total = len(rows)
+    evaluated = total - counts["not_run"]
+    return {"project_id": project_id, "snapshot_id": snapshot.id if snapshot else None,
+            "total": total, "counts": dict(counts), "evaluated": evaluated,
+            "analysis_coverage_percent": round(100 * evaluated / total, 2) if total else 0,
+            "implemented_percent": round(100 * counts["implemented"] / total, 2) if total else 0,
+            "result_source": "manual", "ai_status": "not_connected"}
+
+
 @router.get("/api/v1/diagnostics", tags=["results"])
 def diagnostics(project_id: str, db: DB, snapshot_id: str | None = None):
     snapshot, rows = queries.requirements_with_results(db, project_id, snapshot_id)
@@ -355,3 +380,74 @@ def diagnostics(project_id: str, db: DB, snapshot_id: str | None = None):
                           "severity": 0 if result.status == "mismatch" else 1,
                           "code": req.req_id, "source": "SpecPilot (manual)", "message": result.reason})
     return {"snapshot_id": snapshot.id if snapshot else None, "items": items}
+
+
+@router.post("/api/v1/test-spec/generate", response_model=JobOut, status_code=202, tags=["tests"])
+def generate_tests(body: GenerateTestsRequest, db: DB):
+    project = get_entity(db, Project, body.project_id)
+    reqs = choose_requirements(db, project.id, body.requirement_ids)
+    snapshot = queries.selected_snapshot(db, project.id, None)
+    return workflow.job_out(workflow.create_blocked_job(db, project, "generate_tests", {"requirements": reqs},
+                                                       snapshot.id if snapshot else None))
+
+
+@router.post("/api/v1/test-cases", response_model=TestCaseOut, status_code=201, tags=["tests"])
+def create_test_case(body: TestCaseCreate, db: DB):
+    req = get_entity(db, Requirement, body.requirement_id, body.project_id)
+    check_revision(req, body.revision)
+    case = TestCase(**body.model_dump())
+    db.add(case)
+    db.commit()
+    return case
+
+
+@router.put("/api/v1/test-cases/{test_case_id}", response_model=TestCaseOut, tags=["tests"])
+def update_test_case(test_case_id: str, body: TestCaseCreate, db: DB):
+    case = get_entity(db, TestCase, test_case_id, body.project_id)
+    req = get_entity(db, Requirement, body.requirement_id, body.project_id)
+    check_revision(req, body.revision)
+    for key, value in body.model_dump().items():
+        setattr(case, key, value)
+    db.commit()
+    return case
+
+
+def current_cases(project_id):
+    return select(TestCase).join(Requirement, TestCase.requirement_id == Requirement.id).where(
+        TestCase.project_id == project_id, TestCase.revision == Requirement.revision).order_by(TestCase.test_id)
+
+
+@router.get("/api/v1/test-cases", response_model=Page[TestCaseOut], tags=["tests"])
+def list_test_cases(project_id: str, db: DB, limit: Limit = 50, offset: Offset = 0):
+    get_entity(db, Project, project_id)
+    return queries.page(db, current_cases(project_id), limit, offset)
+
+
+def download(data, filename):
+    return Response(content=data, media_type=XLSX,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.post("/api/test-spec/export", tags=["tests"], response_class=Response,
+             responses={200: {"content": {XLSX: {"schema": {"type": "string", "format": "binary"}}}}})
+@router.post("/api/v1/test-spec/export", tags=["tests"], response_class=Response,
+             responses={200: {"content": {XLSX: {"schema": {"type": "string", "format": "binary"}}}}})
+def export_tests(body: ExportRequest, db: DB):
+    get_entity(db, Project, body.project_id)
+    snapshot, rows = queries.requirements_with_results(db, body.project_id, body.snapshot_id)
+    cases = list(db.scalars(current_cases(body.project_id)))
+    if not cases:
+        raise APIError(409, "NO_TEST_CASES", "내보낼 테스트 케이스가 없습니다. 생성기를 연결하거나 수동 등록하세요",
+                       features.missing("test_case_generation"))
+    notes = {r.id: f"불일치 검토 필요: {result.reason}" for r, result in rows
+             if result and result.status == "mismatch"}
+    return download(exports.test_spec(cases, {r.id: r for r, _ in rows}, notes), "test-spec.xlsx")
+
+
+@router.post("/api/v1/traceability/export", tags=["results"], response_class=Response,
+             responses={200: {"content": {XLSX: {"schema": {"type": "string", "format": "binary"}}}}})
+def export_traceability(body: ExportRequest, db: DB):
+    project = get_entity(db, Project, body.project_id)
+    snapshot, rows = queries.requirements_with_results(db, project.id, body.snapshot_id)
+    return download(exports.traceability(project, snapshot,
+                    [(req, queries.verification_out(db, result)) for req, result in rows]), "traceability.xlsx")

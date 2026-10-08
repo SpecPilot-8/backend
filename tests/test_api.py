@@ -6,7 +6,7 @@ import pymupdf
 import pytest
 from docx import Document
 from fastapi.testclient import TestClient
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from api.main import create_app
 
@@ -68,6 +68,39 @@ def pdf_bytes(text=True):
     return result
 
 
+def test_manual_workflow(client, project, requirement, snapshot):
+    assert requirement["status"] is None
+    assert requirement["analysis_state"] == "not_run"
+    response = verdict(client, project, requirement, snapshot, suggested_code="return failures >= 5")
+    assert response.status_code == 200, response.text
+    evidence = response.json()["evidence"][0]
+    assert evidence["start_line"] == 1 and evidence["end_line"] == 2
+    assert evidence["code_snippet"] == "def locked(failures):\n    return failures >= 10"
+    assert evidence["uri"] == (Path(project["workspace_path"]) / "auth.py").as_uri()
+    result = client.get("/api/v1/diagnostics", params=params(project)).json()
+    assert result["items"][0]["range"] == {
+        "start": {"line": 0, "character": 0}, "end": {"line": 1, "character": 25}}
+    assert result["items"][0]["severity"] == 0
+    dashboard = client.get(f"/api/v1/projects/{project['id']}/dashboard").json()
+    assert dashboard["counts"]["mismatch"] == 1 and dashboard["evaluated"] == 1
+    assert dashboard["implemented_percent"] == 0
+    assert client.get(f"/api/v1/requirements/{requirement['id']}/fix", params=params(project)).json()[
+        "suggested_code"] == "return failures >= 5"
+    assert client.post("/api/v1/test-cases", json=case_body(project, requirement)).status_code == 201
+    exported = client.post("/api/test-spec/export", json=params(project))
+    assert exported.status_code == 200
+    workbook = load_workbook(BytesIO(exported.content))
+    sheet = workbook.active
+    assert sheet["C2"].value == "=SUM(1,2)" and sheet["C2"].data_type == "s"
+    assert sheet["J2"].value is None  # No fabricated PASS result.
+    assert "10회로 구현됨" in sheet["K2"].value and sheet["L2"].value == "manual"
+    assert list(sheet.data_validations.dataValidation)[0].formula1 == '"PASS,FAIL"'
+    trace = client.post("/api/v1/traceability/export", json=params(project))
+    workbook = load_workbook(BytesIO(trace.content))
+    assert workbook.active["F2"].value == "mismatch"
+    assert workbook.active["H2"].value == "auth.py:1-2"
+
+
 def test_snapshot_identity_and_historical_results(client, project, requirement, snapshot):
     old_chunks = chunks(client, project, snapshot)
     assert verdict(client, project, requirement, snapshot, "implemented").status_code == 200
@@ -85,6 +118,31 @@ def test_snapshot_identity_and_historical_results(client, project, requirement, 
     source.write_text("def locked(failures):\n    return failures >= 10\n", encoding="utf-8")
     assert client.post("/api/v1/code/index", json=params(project)).json()["id"] == snapshot["id"]
     assert client.get(url, params=params(project)).json()["status"] == "implemented"
+
+
+def test_requirement_revision_hides_old_results_and_tests(client, project, requirement, snapshot):
+    verdict(client, project, requirement, snapshot, "implemented")
+    body = case_body(project, requirement)
+    created = client.post("/api/v1/test-cases", json=body)
+    assert created.status_code == 201
+    url = f"/api/v1/requirements/{requirement['id']}"
+    changed = {key: requirement[key] for key in
+               ("req_id", "title", "original_text", "condition", "action", "expected", "checklists")}
+    changed["condition"] = "실패 3회"
+    response = client.put(url, params=params(project), json=changed)
+    assert response.json()["revision"] == 2 and response.json()["status"] is None
+    assert client.get("/api/v1/test-cases", params=params(project)).json()["total"] == 0
+    assert client.post("/api/v1/test-spec/export", json=params(project)).status_code == 409
+    assert verdict(client, project, requirement, snapshot).status_code == 409
+    assert client.post("/api/v1/test-cases", json=body).status_code == 409
+    assert client.put(url, params=params(project), json=changed).json()["revision"] == 2
+    requirement["revision"] = 2
+    assert verdict(client, project, requirement, snapshot, "partial").status_code == 200
+    assert client.get(url, params=params(project)).json()["status"] == "partial"
+    body.update(revision=2, actual="잠금 확인", result="PASS")
+    updated = client.put(f"/api/v1/test-cases/{created.json()['id']}", json=body)
+    assert updated.status_code == 200 and updated.json()["result"] == "PASS"
+    assert client.get("/api/v1/test-cases", params=params(project)).json()["total"] == 1
 
 
 @pytest.mark.parametrize("filename,content,kind", [
@@ -136,6 +194,17 @@ def test_upload_size_limit(config):
         response = client.post("/api/spec/parse", data=params(project), files={"file": ("file.pdf", b"12345")})
         assert response.status_code == 413
         assert list((config.data_dir / "uploads").iterdir()) == []
+
+
+def test_project_isolation(client, project, requirement, snapshot, config):
+    other = client.post("/api/v1/projects", json={"name": "Other", "workspace_path": str(config.workspace_root)}).json()
+    paths = [f"/api/v1/requirements/{requirement['id']}", f"/api/v1/code/snapshots/{snapshot['id']}",
+             f"/api/v1/code/chunks/{chunks(client, project, snapshot)[0]['id']}"]
+    for url in paths:
+        assert client.get(url, params=params(other)).status_code == 404
+    assert client.post("/api/v1/verify/run", json={**params(other), "snapshot_id": snapshot["id"]}).status_code == 404
+    assert client.post("/api/v1/test-cases", json={**case_body(project, requirement),
+                                                 "project_id": other["id"]}).status_code == 404
 
 
 def test_evidence_must_belong_to_snapshot(client, project, requirement, snapshot):
@@ -200,6 +269,29 @@ def test_duplicate_rollback_pagination_and_filter(client, project, requirement):
     assert response["total"] == 2 and response["items"][0]["req_id"] == "REQ-002"
     assert client.get("/api/v1/requirements", params={**params(project), "q": "계정"}).json()["total"] == 1
     assert client.get("/api/v1/requirements", params={**params(project), "limit": 0}).status_code == 422
+
+
+def test_unavailable_apis_are_explicit(client, project, requirement, snapshot):
+    for endpoint in ("call-flow", "fix"):
+        response = client.get(f"/api/v1/requirements/{requirement['id']}/{endpoint}", params=params(project))
+        assert response.status_code == 501 and response.json()["error"]["missing_features"]
+    response = client.post(f"/api/v1/requirements/{requirement['id']}/checklists/generate", params=params(project))
+    assert response.status_code == 202 and response.json()["status"] == "blocked"
+    assert client.post("/api/v1/test-spec/generate", json=params(project)).status_code == 202
+    assert client.post(f"/api/v1/requirements/{requirement['id']}/reverify", params=params(project),
+                       json={"snapshot_id": snapshot["id"]}).status_code == 202
+    assert client.post("/api/v1/test-spec/export", json=params(project)).status_code == 409
+
+
+def test_persistence_and_openapi(client, config, project):
+    with TestClient(create_app(config)) as reopened:
+        assert reopened.get(f"/api/v1/projects/{project['id']}").json()["name"] == "Demo"
+        assert reopened.get("/health").json() == {"status": "ok", "ai_status": "not_connected"}
+        paths = reopened.get("/openapi.json").json()["paths"]
+        assert all(p in paths for p in ("/api/spec/parse", "/api/code/verify", "/api/test-spec/export"))
+        assert reopened.get("/docs").status_code == 200
+        capability = reopened.get("/api/v1/capabilities").json()
+        assert any(c["code"] == "implementation_judgment" and c["status"] == "not_implemented" for c in capability)
 
 
 def test_core_project_persistence_and_routes(client, config, project):
