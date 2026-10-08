@@ -11,10 +11,10 @@ from api.config import Settings
 from api.dependencies import get_entity, session, settings
 from api.errors import APIError
 from api.models import CodeChunk, Document, Job, Project, Requirement, Snapshot, VerificationResult
-from api.models import new_id
+from api.models import new_id, now
 from api.schemas import (
     Capability, ChunkOut, CodeIndexRequest, DocumentDetail, DocumentOut, JobOut, Page, ProjectCreate, ProjectOut, RequirementCreate,
-    RequirementOut, RequirementSpec, SnapshotOut,
+    RequirementOut, RequirementSpec, ReverifyRequest, SnapshotOut, VerificationImport, VerificationOut, VerifyRequest,
 )
 from services import capabilities as features
 from services import code, documents, queries, workflow
@@ -245,6 +245,33 @@ def get_chunk(chunk_id: str, project_id: str, db: DB):
     return chunk
 
 
+def choose_requirements(db, project_id, ids):
+    reqs = list(db.scalars(select(Requirement).where(Requirement.project_id == project_id)))
+    if ids is not None:
+        reqs = [get_entity(db, Requirement, identity, project_id) for identity in dict.fromkeys(ids)]
+    if not reqs:
+        raise APIError(409, "NO_REQUIREMENTS", "먼저 요구사항을 추출하거나 수동 등록하세요",
+                       features.missing("requirement_extraction"))
+    return [{"id": r.id, "revision": r.revision} for r in reqs]
+
+
+@router.post("/api/code/verify", response_model=JobOut, status_code=202, tags=["analysis"])
+@router.post("/api/v1/verify/run", response_model=JobOut, status_code=202, tags=["analysis"])
+def verify(body: VerifyRequest, db: DB):
+    project = get_entity(db, Project, body.project_id)
+    get_entity(db, Snapshot, body.snapshot_id, project.id)
+    reqs = choose_requirements(db, project.id, body.requirement_ids)
+    return workflow.job_out(workflow.create_blocked_job(db, project, "verify", {"requirements": reqs},
+                                                       body.snapshot_id))
+
+
+@router.post("/api/v1/requirements/{requirement_id}/reverify",
+             response_model=JobOut, status_code=202, tags=["analysis"])
+def reverify(requirement_id: str, project_id: str, body: ReverifyRequest, db: DB):
+    return verify(VerifyRequest(project_id=project_id, snapshot_id=body.snapshot_id,
+                                requirement_ids=[requirement_id]), db)
+
+
 @router.get("/api/v1/jobs", response_model=Page[JobOut], tags=["analysis"])
 def list_jobs(project_id: str, db: DB, limit: Limit = 50, offset: Offset = 0):
     get_entity(db, Project, project_id)
@@ -266,3 +293,65 @@ def job_events(job_id: str, project_id: str, db: DB):
     event = f"id: {job_id}\nevent: blocked\ndata: {json.dumps(job, ensure_ascii=False)}\n\n"
     return StreamingResponse(iter([event]), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/api/v1/verification-results/import", response_model=VerificationOut, tags=["results"])
+def import_verification(body: VerificationImport, db: DB):
+    req = get_entity(db, Requirement, body.requirement_id, body.project_id)
+    get_entity(db, Snapshot, body.snapshot_id, body.project_id)
+    check_revision(req, body.revision)
+    for identity in body.evidence_chunk_ids:
+        chunk = get_entity(db, CodeChunk, identity)
+        if chunk.snapshot_id != body.snapshot_id:
+            raise APIError(422, "INVALID_EVIDENCE", "근거 청크가 선택한 스냅샷에 속하지 않습니다")
+    result = current_result(db, req, body.snapshot_id)
+    values = body.model_dump()
+    if result is None:
+        result = VerificationResult(**values)
+        db.add(result)
+    else:
+        for key, value in values.items():
+            setattr(result, key, value)
+        result.updated_at = now()
+    db.commit()
+    return queries.verification_out(db, result)
+
+
+def check_revision(req, revision):
+    if req.revision != revision:
+        raise APIError(409, "STALE_REQUIREMENT", "요구사항이 변경되었습니다. 현재 버전을 다시 조회하세요")
+
+
+@router.get("/api/v1/requirements/{requirement_id}/call-flow", tags=["results"])
+def call_flow(requirement_id: str, project_id: str, db: DB):
+    get_entity(db, Requirement, requirement_id, project_id)
+    features.not_implemented("call_flow")
+
+
+@router.get("/api/v1/requirements/{requirement_id}/fix", tags=["results"])
+def get_fix(requirement_id: str, project_id: str, db: DB, snapshot_id: str | None = None):
+    req = get_entity(db, Requirement, requirement_id, project_id)
+    result = current_result(db, req, snapshot_id)
+    if result is None or not result.suggested_code:
+        features.not_implemented("fix_generation")
+    return {"requirement_id": req.id, "snapshot_id": result.snapshot_id, "revision": result.revision,
+            "source": "manual", "suggested_code": result.suggested_code,
+            "evidence": queries.evidence_out(db, result), "application_status": "suggestion_only"}
+
+
+@router.get("/api/v1/diagnostics", tags=["results"])
+def diagnostics(project_id: str, db: DB, snapshot_id: str | None = None):
+    snapshot, rows = queries.requirements_with_results(db, project_id, snapshot_id)
+    items = []
+    for req, result in rows:
+        if result is None or result.status not in ("mismatch", "partial"):
+            continue
+        for evidence in queries.evidence_out(db, result):
+            items.append({"requirement_id": req.id, "req_id": req.req_id, "revision": req.revision,
+                          "uri": evidence["uri"], "file_path": evidence["file_path"],
+                          "range": {"start": {"line": evidence["start_line"] - 1, "character": 0},
+                                    "end": {"line": evidence["end_line"] - 1,
+                                            "character": len(evidence["code_snippet"].splitlines()[-1])}},
+                          "severity": 0 if result.status == "mismatch" else 1,
+                          "code": req.req_id, "source": "SpecPilot (manual)", "message": result.reason})
+    return {"snapshot_id": snapshot.id if snapshot else None, "items": items}
