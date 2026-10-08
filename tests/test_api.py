@@ -1,5 +1,6 @@
 from dataclasses import replace
 from io import BytesIO
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -118,6 +119,49 @@ def test_upload_size_limit(config):
         assert list((config.data_dir / "uploads").iterdir()) == []
 
 
+@pytest.mark.parametrize("relative_path", ["../", "/etc", ".venv"])
+def test_source_path_boundaries(client, project, relative_path):
+    (Path(project["workspace_path"]) / ".venv").mkdir(exist_ok=True)
+    response = client.post("/api/v1/code/index", json={**params(project), "relative_path": relative_path})
+    assert response.status_code == 422
+
+
+def test_source_symlink_exclusion_and_ast_parsers(client, project, config):
+    root = Path(project["workspace_path"])
+    outside = config.workspace_root.parent / "outside.py"
+    outside.write_text("private = True\n", encoding="utf-8")
+    (root / "leak.py").symlink_to(outside)
+    (root / "Example.java").write_text("class Example { public boolean locked(int n) { return n >= 5; } }", encoding="utf-8")
+    (root / "ui.js").write_text("function locked(n) { return n >= 5; }", encoding="utf-8")
+    (root / "page.html").write_text('<form action="/login"><input name="password" /></form>', encoding="utf-8")
+    (root / "page.tsx").write_text("export const Page = () => <div/>;", encoding="utf-8")
+    snapshot = client.post("/api/v1/code/index", json=params(project)).json()
+    assert snapshot["file_count"] == 5 and any("page.tsx" in w for w in snapshot["warnings"])
+    stored = chunks(client, project, snapshot)
+    assert {c["file_path"] for c in stored} == {"auth.py", "Example.java", "ui.js", "page.html", "page.tsx"}
+    assert client.post("/api/v1/code/index", json={**params(project), "relative_path": "leak.py"}).status_code == 422
+
+
+def test_source_size_limit_and_no_snapshot(config):
+    with TestClient(create_app(replace(config, max_source_file_bytes=4))) as client:
+        (config.workspace_root / "large.py").write_text("value = 100\n", encoding="utf-8")
+        project = client.post("/api/v1/projects", json={"name": "small", "workspace_path": str(config.workspace_root)}).json()
+        assert client.post("/api/v1/code/index", json=params(project)).status_code == 413
+        assert client.get("/api/v1/code/snapshots", params=params(project)).json()["total"] == 0
+
+
+def test_python_decorator_and_module_statements_preserved(client, project):
+    path = Path(project["workspace_path"]) / "auth.py"
+    path.write_text('from fastapi import FastAPI\napp = FastAPI()\n\n@app.get("/login")\n'
+                    'def login():\n    return {"ok": True}\n', encoding="utf-8")
+    snapshot = client.post("/api/v1/code/index", json=params(project)).json()
+    stored = chunks(client, project, snapshot)
+    assert len(stored) == 3
+    assert stored[2]["start_line"] == 4
+    assert stored[2]["content"].startswith('@app.get("/login")')
+    assert stored[0]["content"] == "from fastapi import FastAPI"
+
+
 def test_duplicate_rollback_pagination_and_filter(client, project, requirement):
     body = {"project_id": project["id"], "req_id": "REQ-001", "title": "duplicate"}
     assert client.post("/api/v1/requirements", json=body).status_code == 409
@@ -139,3 +183,10 @@ def test_core_project_persistence_and_routes(client, config, project):
         assert reopened.get("/api/v1/jobs", params=params(project)).json()["total"] == 0
     invalid = client.post("/api/v1/projects", json={"name": "Outside", "workspace_path": str(config.workspace_root.parent)})
     assert invalid.status_code == 422
+
+
+def test_snapshot_reuse_preserves_chunk_ids(client, project, snapshot):
+    original = chunks(client, project, snapshot)
+    repeated = client.post("/api/v1/code/index", json=params(project)).json()
+    assert repeated["id"] == snapshot["id"]
+    assert chunks(client, project, repeated) == original
