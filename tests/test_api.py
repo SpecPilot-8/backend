@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
@@ -7,8 +8,10 @@ import pytest
 from docx import Document
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
+from sqlalchemy import select
 
 from api.main import create_app
+from api.models import Job
 
 
 
@@ -99,6 +102,44 @@ def test_manual_workflow(client, project, requirement, snapshot):
     workbook = load_workbook(BytesIO(trace.content))
     assert workbook.active["F2"].value == "mismatch"
     assert workbook.active["H2"].value == "auth.py:1-2"
+
+
+def test_blocked_job_freezes_model_and_revision(client, project, requirement, snapshot):
+    settings_url = f"/api/v1/projects/{project['id']}/llm"
+    config = {"provider": "anthropic", "model": "selected-single-model", "base_url": "https://example.com"}
+    assert client.put(settings_url, json=config).status_code == 200
+    result = client.post("/api/code/verify", json=params(project, snapshot))
+    assert result.status_code == 202
+    job = result.json()
+    assert job["status"] == "blocked"
+    assert "implementation_judgment" in [m["code"] for m in job["missing_features"]]
+    config["base_url"] = "https://other.example.com"
+    client.put(settings_url, json=config)
+    polled = client.get(job["poll_url"]).json()
+    assert polled["model_config_snapshot"]["base_url"] == "https://example.com"
+    assert polled["model_config_snapshot"]["config_version"] == 1
+    events = client.get(job["events_url"])
+    assert "event: blocked" in events.text
+    assert json.loads(events.text.split("data: ")[1].strip())["id"] == job["id"]
+    with client.app.state.database.session() as db:
+        record = db.scalar(select(Job).where(Job.id == job["id"]))
+        assert record.request_data["requirements"] == [{"id": requirement["id"], "revision": 1}]
+
+
+def test_model_limit_and_no_key_disclosure(client, project):
+    url = f"/api/v1/projects/{project['id']}/llm"
+    assert client.put(url, json={"provider": "anthropic", "model": "one"}).status_code == 200
+    result = client.put(url, json={"provider": "other", "model": "two"})
+    assert result.status_code == 501 and result.json()["error"]["missing_features"][0]["code"] == "multi_model"
+    secret = "test-secret-key-never-log"
+    response = client.post(url + "/connection-check", json={"api_key": secret})
+    assert response.status_code == 501 and secret not in response.text
+    assert secret not in client.get(url).text
+    invalid = client.put(url, json={"provider": "anthropic", "model": "one", "api_key": secret})
+    assert invalid.status_code == 422 and secret not in invalid.text
+    invalid = client.put(url, json={"provider": "anthropic", "model": "one",
+                                    "base_url": "https://example.com?key=" + secret})
+    assert invalid.status_code == 422 and secret not in invalid.text
 
 
 def test_snapshot_identity_and_historical_results(client, project, requirement, snapshot):
