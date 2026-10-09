@@ -25,6 +25,7 @@ API의 `api_*` 테이블은 기존 CLI 샘플 테이블과 분리한다. 현재�
 현재 구현 범위:
 
 - [FastAPI 서버와 프로젝트 관리 기반 추가](docs/api-core.md)
+- [기획서 파싱과 요구사항 관리 API 추가](docs/spec-api.md)
 
 검증: `python -m pytest -q`, `python -m ruff check api services tests`.
 
