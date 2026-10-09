@@ -68,6 +68,25 @@ def pdf_bytes(text=True):
     return result
 
 
+def test_snapshot_identity_and_historical_results(client, project, requirement, snapshot):
+    old_chunks = chunks(client, project, snapshot)
+    assert verdict(client, project, requirement, snapshot, "implemented").status_code == 200
+    repeated = client.post("/api/v1/code/index", json=params(project)).json()
+    assert repeated["id"] == snapshot["id"]
+    assert chunks(client, project, repeated) == old_chunks
+    source = Path(project["workspace_path"]) / "auth.py"
+    source.write_text("def locked(failures):\n    return failures >= 5\n", encoding="utf-8")
+    changed = client.post("/api/v1/code/index", json=params(project)).json()
+    assert changed["id"] != snapshot["id"]
+    url = f"/api/v1/requirements/{requirement['id']}"
+    assert client.get(url, params=params(project)).json()["status"] is None
+    assert client.get(url, params=params(project, snapshot)).json()["status"] == "implemented"
+    assert chunks(client, project, snapshot) == old_chunks
+    source.write_text("def locked(failures):\n    return failures >= 10\n", encoding="utf-8")
+    assert client.post("/api/v1/code/index", json=params(project)).json()["id"] == snapshot["id"]
+    assert client.get(url, params=params(project)).json()["status"] == "implemented"
+
+
 @pytest.mark.parametrize("filename,content,kind", [
     ("plan.docx", docx_bytes, "paragraph"), ("plan.xlsx", xlsx_bytes, "cell"), ("plan.pdf", pdf_bytes, "text"),
 ])
@@ -117,6 +136,16 @@ def test_upload_size_limit(config):
         response = client.post("/api/spec/parse", data=params(project), files={"file": ("file.pdf", b"12345")})
         assert response.status_code == 413
         assert list((config.data_dir / "uploads").iterdir()) == []
+
+
+def test_evidence_must_belong_to_snapshot(client, project, requirement, snapshot):
+    source = Path(project["workspace_path"]) / "auth.py"
+    source.write_text("def locked():\n    return True\n", encoding="utf-8")
+    other = client.post("/api/v1/code/index", json=params(project)).json()
+    result = verdict(client, project, requirement, snapshot,
+                     evidence_chunk_ids=[chunks(client, project, other)[0]["id"]])
+    assert result.status_code == 422
+    assert verdict(client, project, requirement, snapshot, evidence_chunk_ids=[]).status_code == 422
 
 
 @pytest.mark.parametrize("relative_path", ["../", "/etc", ".venv"])
@@ -190,3 +219,13 @@ def test_snapshot_reuse_preserves_chunk_ids(client, project, snapshot):
     repeated = client.post("/api/v1/code/index", json=params(project)).json()
     assert repeated["id"] == snapshot["id"]
     assert chunks(client, project, repeated) == original
+
+
+def test_verification_job_reports_missing_features(client, project, requirement, snapshot):
+    response = client.post("/api/code/verify", json=params(project, snapshot))
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "blocked"
+    assert "implementation_judgment" in [item["code"] for item in job["missing_features"]]
+    assert client.get(job["poll_url"]).json()["id"] == job["id"]
+    assert "event: blocked" in client.get(job["events_url"]).text
