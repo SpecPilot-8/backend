@@ -4,20 +4,20 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.config import Settings
 from api.dependencies import get_entity, session, settings
 from api.errors import APIError
-from api.models import Document, Job, Project, Requirement, VerificationResult
+from api.models import CodeChunk, Document, Job, Project, Requirement, Snapshot, VerificationResult
 from api.models import new_id
 from api.schemas import (
-    Capability, DocumentDetail, DocumentOut, JobOut, Page, ProjectCreate, ProjectOut, RequirementCreate,
-    RequirementOut, RequirementSpec,
+    Capability, ChunkOut, CodeIndexRequest, DocumentDetail, DocumentOut, JobOut, Page, ProjectCreate, ProjectOut, RequirementCreate,
+    RequirementOut, RequirementSpec, SnapshotOut,
 )
 from services import capabilities as features
-from services import documents, queries, workflow
+from services import code, documents, queries, workflow
 
 from services.workspace import workspace_path
 
@@ -187,6 +187,62 @@ def generate_checklists(requirement_id: str, project_id: str, db: DB):
     project = get_entity(db, Project, project_id)
     return workflow.job_out(workflow.create_blocked_job(db, project, "generate_checklists",
                                                        {"requirement_id": req.id, "revision": req.revision}))
+
+
+def snapshot_out(db, snapshot):
+    count = db.scalar(select(func.count()).select_from(CodeChunk).where(CodeChunk.snapshot_id == snapshot.id))
+    return {
+        **{field: getattr(snapshot, field) for field in
+           ("id", "project_id", "root_path", "content_hash", "file_count", "warnings", "created_at")},
+        "chunk_count": count,
+    }
+
+
+@router.post("/api/v1/code/index", response_model=SnapshotOut, status_code=201, tags=["code"])
+def index_code(body: CodeIndexRequest, db: DB, config: Config):
+    project = get_entity(db, Project, body.project_id)
+    root, digest, count, chunks, warnings = code.index_source(project.workspace_path, body.relative_path, config)
+    snapshot = db.scalar(select(Snapshot).where(Snapshot.project_id == project.id, Snapshot.content_hash == digest))
+    if snapshot is None:
+        snapshot = Snapshot(project_id=project.id, root_path=str(root), content_hash=digest,
+                            file_count=count, warnings=warnings)
+        db.add(snapshot)
+        db.flush()
+        for chunk in chunks:
+            db.add(CodeChunk(snapshot_id=snapshot.id, file_path=chunk.file_path, start_line=chunk.start_line,
+                             end_line=chunk.end_line, chunk_type=chunk.chunk_type,
+                             symbol=chunk.symbol_fqn, content=chunk.content))
+    project.latest_snapshot_id = snapshot.id
+    db.commit()
+    return snapshot_out(db, snapshot)
+
+
+@router.get("/api/v1/code/snapshots", response_model=Page[SnapshotOut], tags=["code"])
+def list_snapshots(project_id: str, db: DB, limit: Limit = 50, offset: Offset = 0):
+    get_entity(db, Project, project_id)
+    result = queries.page(db, select(Snapshot).where(Snapshot.project_id == project_id)
+                          .order_by(Snapshot.created_at, Snapshot.id), limit, offset)
+    result["items"] = [snapshot_out(db, s) for s in result["items"]]
+    return result
+
+
+@router.get("/api/v1/code/snapshots/{snapshot_id}", response_model=SnapshotOut, tags=["code"])
+def get_snapshot(snapshot_id: str, project_id: str, db: DB):
+    return snapshot_out(db, get_entity(db, Snapshot, snapshot_id, project_id))
+
+
+@router.get("/api/v1/code/chunks", response_model=Page[ChunkOut], tags=["code"])
+def list_chunks(project_id: str, snapshot_id: str, db: DB, limit: Limit = 50, offset: Offset = 0):
+    get_entity(db, Snapshot, snapshot_id, project_id)
+    return queries.page(db, select(CodeChunk).where(CodeChunk.snapshot_id == snapshot_id)
+                        .order_by(CodeChunk.file_path, CodeChunk.start_line, CodeChunk.id), limit, offset)
+
+
+@router.get("/api/v1/code/chunks/{chunk_id}", response_model=ChunkOut, tags=["code"])
+def get_chunk(chunk_id: str, project_id: str, db: DB):
+    chunk = get_entity(db, CodeChunk, chunk_id)
+    get_entity(db, Snapshot, chunk.snapshot_id, project_id)
+    return chunk
 
 
 @router.get("/api/v1/jobs", response_model=Page[JobOut], tags=["analysis"])
