@@ -4,6 +4,7 @@
 판정마다 근거 코드 위치를 붙여, 사람이 결과를 검증할 수 있게 하는 것이 목표다.
 
 설계 배경과 원칙은 [CLAUDE.md](CLAUDE.md), 판정 기준은 [docs/label-definition.md](docs/label-definition.md)에 있다.
+MVP의 목표 기능·입출력·완료 조건과 현재 구현 상태는 [기능명세서](docs/FUNCTIONAL_SPEC.md)에 정리했다.
 
 ## FastAPI 서버
 
