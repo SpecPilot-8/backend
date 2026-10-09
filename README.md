@@ -5,7 +5,30 @@
 
 설계 배경과 원칙은 [CLAUDE.md](CLAUDE.md), 판정 기준은 [docs/label-definition.md](docs/label-definition.md)에 있다.
 
-## 파이프라인
+## FastAPI 서버
+
+Python 3.11 이상에서 실행한다. 기존 CLI 엔진 옆에 프로젝트별 HTTP API를 기능별로 추가한다.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Swagger: <http://127.0.0.1:8000/docs>. 현재 연결된 기능은 `/api/v1/capabilities`에서 확인한다.
+기본 DB는 `.data/api.sqlite3`이며 `SPECPILOT_DATABASE_URL`로 PostgreSQL URL을 설정할 수 있다.
+업로드 원본은 `.data/uploads/`에 저장한다. `SPECPILOT_WORKSPACE_ROOT`로 허용 프로젝트 루트를 지정한다.
+AI 호출은 연결하지 않았으며 키를 저장하지 않는다. 일본어 번역과 다중 모델 지원은 제외한다.
+API의 `api_*` 테이블은 기존 CLI 샘플 테이블과 분리한다. 현재는 로컬 개발용이며 인증·운영 마이그레이션은 미구현이다.
+
+현재 구현 범위:
+
+- [FastAPI 서버와 프로젝트 관리 기반 추가](docs/api-core.md)
+
+검증: `python -m pytest -q`, `python -m ruff check api services tests`.
+
+## 기존 CLI 분석 엔진의 파이프라인
 
 ```mermaid
 flowchart LR
@@ -34,7 +57,7 @@ flowchart LR
 | 6 | 판정 | 조건마다 구현됨·부분·불일치·없음을 정하고 요구사항 단위로 집계한다 | `condition_verdict`, `requirement_verdict` | O |
 | 7 | 출력 | 판정 결과를 추적표·테스트 사양서(xlsx)로 낸다 | `output/*.xlsx` | - |
 
-## 진행 상태
+## 기존 CLI 진행 상태
 
 | 단계 | 상태 |
 |---|---|
@@ -44,7 +67,7 @@ flowchart LR
 | 정확도 평가 (골든셋) | 두 레포 전체 480개 조건 정답 완료(샘플 앱 실행 확인). 점수는 `docs/golden-score.md` |
 | 로컬 LLM 전환 | 미착수. 사용자 PC 사양·모델 미정 |
 
-## 설치
+## 기존 CLI 설치
 
 ```bash
 python3 -m venv .venv
@@ -64,7 +87,7 @@ echo 'ANTHROPIC_API_KEY=<키>' > .env
 # 선택: SPECPILOT_LLM_PROVIDER=anthropic, SPECPILOT_LLM_MODEL=claude-opus-5 (비우면 이 기본값)
 ```
 
-## 실행 순서
+## 기존 CLI 실행 순서
 
 씽크트리 샘플 자료는 `specpilot_projects_share/`에 두고 쓴다 (고객 자료라 `.gitignore`로 제외).
 
@@ -240,7 +263,7 @@ output/         추적표 xlsx (git 제외)
 - **사람 검수는 기획서 쪽 의심 구간에만.** 파싱 신뢰도, 원문 인용 불일치, 누락 의심이 검수 큐로 간다
 - **근거는 항상 배열이다.** 요구사항 하나의 근거는 여러 파일에 흩어지는 게 정상이다
 
-## 알려진 한계
+## 기존 CLI의 알려진 한계
 
 - 헤더 좌표는 샘플 PDF 템플릿 기준 고정값이다. 다른 레이아웃의 기획서는 좌표를 다시 잡아야 한다
 - OCR 신뢰도가 높아도 오독이 있다 ("마이페이지" → "파이페이지"가 신뢰도 0.948). 신뢰도만으로 거르지 못한다
