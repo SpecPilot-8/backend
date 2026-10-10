@@ -1,6 +1,6 @@
 # SpecPilot API 명세서
 
-버전: 목표 계약 2.0 · 갱신일: 2026-10-10
+버전: 목표 계약 2.1 · 갱신일: 2026-10-10
 
 관련 문서: [기능명세](FUNCTIONAL_SPEC.md), [모델 담당·내부 입출력](MODEL_TEAM_GUIDE.md).
 
@@ -259,7 +259,8 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
 | PATCH | `/projects/{p}/test-cases/{tc}/procedure` | `{base_revision,...변경 절차}` → 새 revision TestCase |
 | POST | `/projects/{p}/test-cases/{tc}/executions` | `{test_case_revision,client_execution_id,environment?,tested_build?}` → 201 TestExecution |
 | GET | `/projects/{p}/test-cases/{tc}/executions` | limit,offset → Page[TestExecution] |
-| PATCH | `/projects/{p}/test-executions/{e}` | 아래 자동 저장 요청 → 갱신 TestExecution |
+| PATCH | `/projects/{p}/test-executions/{e}` | 아래 결과 수정 요청 → 갱신 TestExecution; 개별 저장용 |
+| POST | `/projects/{p}/test-specifications/{t}/edit-batches` | 7.3의 표 편집 저장 → 200 배치 결과; 기본 UI의 저장 버튼용 |
 | GET | `/projects/{p}/test-specifications/{t}/execution-summary` | 아래 선택 정책 → 상태별 수 |
 
 ### 7.1 절차 생성·편집
@@ -283,9 +284,9 @@ type은 positive/negative/boundary, steps는 1..100개의 순서 있는 문자�
 
 생성기는 prediction `{status,reason,verification_run_id,evidence_ids}`를 덧붙일 수 있지만 actual·실제 status는 받지 않는다. 수동 입력의 origin은 manual, 모델 생성은 generated다. 재생성은 새 사양서 후보를 만들며 사용자 편집을 보존한다. 절차 수정 시 사양서 revision도 갱신하고 이전 사양서 revision에 연결된 시험 버전을 보존한다.
 
-### 7.2 실제 결과 자동 저장
+### 7.2 실제 결과 수정의 하위 계약
 
-첫 실제 편집 시 프런트가 수행 회차를 생성하고 받은 ID로 PATCH한다. 화면을 열었다는 이유만으로 회차를 생성하지 않는다. client_execution_id는 같은 생성 요청 재시도 시 중복 회차를 막는 UUID다. 같은 ID·같은 입력은 기존 회차를 반환하고, 같은 ID·다른 입력은 409다. 신규 회차의 초기 status는 not_run, actual과 notes는 빈 문자열, version은 1이다.
+기본 UI는 편집 중 로컬 초안만 유지하고 저장 버튼에서 7.3의 배치 API를 호출한다. 아래 개별 생성/PATCH는 저장 서비스의 하위 계약 또는 개별 기록 클라이언트용이다. 화면 열기·편집 진입·값 입력만으로 수행 회차를 생성하지 않는다. client_execution_id는 같은 생성 요청 재시도 시 중복 회차를 막는 UUID다. 같은 ID·같은 입력은 기존 회차를 반환하고, 같은 ID·다른 입력은 409다. 신규 회차의 초기 status는 not_run, actual과 notes는 빈 문자열, version은 1이다.
 
 ```json
 {
@@ -301,14 +302,60 @@ type은 positive/negative/boundary, steps는 1..100개의 순서 있는 문자�
 성공 응답은 전체 TestExecution과 증가한 version·서버 updated_at을 반환한다.
 
 - PATCH는 변경 필드만 받는다. actual/notes는 각 10,000자 이하. 시험 전제·기대 결과를 여기서 수정하지 않는다.
-- passed/failed는 actual과 performed_at이 필요하고, on_hold는 보류 이유 notes가 필요하다. 상태 변경 후 전체 저장 데이터 기준으로 검증한다. not_run 상태에서도 결과 초안의 자동 저장은 가능하다.
+- passed/failed는 actual과 performed_at이 필요하고, on_hold는 보류 이유 notes가 필요하다. 상태 변경 후 전체 저장 데이터 기준으로 검증한다. not_run 상태에서도 사용자가 저장을 확정한 결과 초안을 보존할 수 있다.
 - 단순 텍스트 저장이 실제 통과 상태를 자동 설정하지 않는다. 되돌리기도 사용자의 명시적 상태 선택으로만 처리한다.
 - base_version 불일치면 409 VERSION_CONFLICT와 current_version을 반환한다. 프런트는 입력을 보존하고 최신값과 비교한다. 무조건 덮어쓰기 재시도는 하지 않는다.
 - client_edit_id별로 동일 요청 재전송을 판별한다. 동일 요청의 재시도는 이미 저장한 응답을 반환하며 다시 version을 올리지 않는다. 동일 ID의 다른 내용은 409다.
-- 프런트는 시험별 저장 요청을 직렬화하고, 최신 편집 ID에 해당하는 응답만 화면에 반영한다. 시험 선택 변경·저장 오류에도 초안을 보존한다.
+- 프런트는 저장 버튼의 중복 제출을 막고 해당 저장 요청의 응답만 반영한다. 시험 선택 변경·저장 오류에도 초안을 보존한다. 기본 표 UI에서 여러 개별 API를 병렬 호출해 부분 저장을 만들지 않는다.
 - tested_build는 실제 시험 대상 빌드 식별자다. 코드 예측의 snapshot_id와 다를 수 있으며 서버가 자동으로 같은 것이라고 채우지 않는다.
 
 시험별 최신 **선택된 사양서의 절차 revision에 대한** 회차로 summary를 계산한다. 해당 회차가 없으면 not_run이다. 필터는 requirement_id를 허용하며 `{total,not_run,passed,failed,on_hold}`를 반환한다. 과거 절차의 PASS를 새 절차 통과로 가져오지 않는다.
+
+### 7.3 표 편집의 명시적 배치 저장
+
+`POST /api/v2/projects/{p}/test-specifications/{t}/edit-batches`
+
+표 우측 편집 아이콘은 클라이언트 모드만 전환한다. **저장 버튼을 누를 때만** 변경된 시험을 하나의 요청으로 제출한다. 취소·행 선택·포커스 이탈에는 이 API를 호출하지 않는다.
+
+```json
+{
+  "base_specification_revision": 2,
+  "client_save_id": "ed3667c3-b31b-4584-b74b-0f117c5bd4a2",
+  "changes": [
+    {
+      "test_case_id": "tc-003",
+      "base_test_case_revision": 1,
+      "procedure": {
+        "input_data": "단위가 확인된 300MB 파일",
+        "steps": ["공지사항 등록 화면에서 파일을 선택한다.", "저장을 눌러 실제 동작을 확인한다."],
+        "expected": "명세 허용 범위의 파일이 정상 등록된다."
+      },
+      "execution": {
+        "operation": "create",
+        "bind_to": "after_save",
+        "status": "failed",
+        "actual": "300MB 파일이 50MB 제한 메시지와 함께 거부됨",
+        "notes": "QA 환경에서 수행한 결과",
+        "performed_at": "2026-10-10T05:00:00Z"
+      }
+    }
+  ]
+}
+```
+
+- changes는 1..200개이며 test_case_id 중복을 허용하지 않는다. 수정할 procedure 또는 execution이 하나 이상 있어야 한다. 원문·판정·코드 예측·식별자는 편집 요청으로 변경하지 않는다.
+- procedure는 7.1의 전제·입력·절차·기대 결과 중 변경 필드만 받는다. 기본 표에서는 steps/input_data/expected를 편집한다. 각 항목의 base_test_case_revision을 검사한다.
+- execution.operation=create는 `bind_to:"after_save"`를 사용한다. 같은 배치에서 절차가 바뀌면 새 절차 revision, 안 바뀌면 기존 revision에 새 수행 회차를 만든다. UI에서 임의의 다음 revision 숫자를 계산하지 않는다.
+- 기존 회차 수정은 operation=update와 execution_id/base_version을 받는다. 회차의 절차 revision은 변경할 수 없다. 같은 항목의 절차를 변경하면서 과거 회차를 update하려 하면 409 EXECUTION_REVISION_CONFLICT다. 새 회차 create로 기록해야 한다.
+- 상태·actual·notes·performed_at·environment·tested_build는 7.2의 제한을 따른다. 실제 결과를 수정하지 않은 항목에는 execution을 보내지 않는다. 표를 편집했다는 이유만으로 미실행 회차를 일괄 생성하지 않는다.
+- 서버는 프로젝트·사양서 소속, 사양서 revision, 모든 시험 revision·회차 version, 필드 유효성을 먼저 검증한다. 하나라도 실패하면 **전체를 저장하지 않는다**. 각 갱신은 DB 트랜잭션과 조건부 버전 갱신으로 보장한다.
+- 성공 응답은 `{client_save_id,specification_revision,test_cases:[TestCase],executions:[TestExecution],saved_at}`다. 절차 변경이 있으면 사양서 revision은 배치당 한 번 증가하고, 회차만 바뀌면 사양서 revision은 유지한다. 프런트는 이 응답과 집계 재조회로 읽기 모드를 갱신한다.
+- client_save_id + 동일 요청은 재시도 시 같은 결과를 반환한다. 응답을 받지 못해 재시도해도 회차·revision을 중복 생성하지 않는다. 같은 ID의 다른 요청은 409 IDEMPOTENCY_CONFLICT다. 반환할 저장 결과도 트랜잭션 안에서 기록한다.
+- 충돌·검증 오류 details에 `{items:[{test_case_id,field,code,current_revision?,current_version?}]}`를 반환한다. 실패한 요청 원문이나 키를 오류에 되돌리지 않는다. 프런트는 초안을 보존하고 편집 모드를 유지한다.
+- 절차·입력·기대 결과 변경은 시험 예측을 갱신 필요로 표시한다. 이전 revision의 예측·실제 결과는 그대로 보존한다. 수정된 시험의 prediction.status는 unknown으로 두고 기존 예측을 새 시험의 판정처럼 표시하지 않는다.
+- 저장 중에는 저장·취소·화면 이탈을 잠시 비활성화한다. 변경 없는 세션은 저장 버튼을 비활성화한다. 취소는 클라이언트 초안 폐기만 수행한다.
+
+이 API는 개발 목표다. Figma의 저장 프로토타입은 예시 변수만 갱신하며, 실제 DB 저장·트랜잭션을 구현한 상태가 아니다.
 
 ## 8. 작업·산출물 API (개발 목표)
 
@@ -379,4 +426,4 @@ SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/
 3. 모델 팀의 구조화 결과를 검증하는 어댑터와 작업 워커를 붙인다. 모델 SDK를 라우터에 직접 넣지 않는다.
 4. 조건/청크/노드/시험 ID의 같은 프로젝트·버전 소속을 검사한다. 모델의 임의 경로·줄 번호는 거부한다.
 5. v1 PASS→passed, FAIL→failed, null→not_run으로 이관한다. 기존 기록에 수행 시간·환경이 없으면 없는 그대로 표시하며 만들어 채우지 않는다. 이전 actual/result를 새 절차 필드에 합치지 않는다.
-6. 실제 UI 시나리오로 자동 저장 충돌·실패 복구·0/N 근거·작업 차단·과거 결과 보존을 검증한 뒤 v2 지원 상태를 켠다.
+6. 실제 UI 시나리오로 표 저장·취소·배치 충돌·실패 복구·0/N 근거·작업 차단·과거 결과 보존을 검증한 뒤 v2 지원 상태를 켠다.
