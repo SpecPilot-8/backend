@@ -5,7 +5,7 @@
 
 설계 배경과 원칙은 [CLAUDE.md](CLAUDE.md), 판정 기준은 [docs/label-definition.md](docs/label-definition.md)에 있다.
 VS Code 스타일 웹앱의 화면 흐름·목표 기능·완료 조건과 현재 구현 상태는 [기능명세서](docs/FUNCTIONAL_SPEC.md)에 정리했다.
-현재 API와 새 UI를 위한 v2 개발 계약은 [API 명세서](docs/API_SPEC.md), 문서 분석·코드 분석 팀원의 요구 기능과 인계 데이터는 [모델 개발 담당 명세](docs/MODEL_TEAM_GUIDE.md)를 따른다.
+현재 API와 새 UI를 위한 v2 개발 계약은 [API 명세서](docs/API_SPEC.md), 문서 분석·코드 분석 팀원의 요구 기능과 인계 데이터는 [모델 개발 담당 명세](docs/MODEL_TEAM_GUIDE.md)를 따른다. 기획서 파싱 담당에게 전달할 출력 형식·주제/소주제 구조·예제는 [기획서 파싱 출력 계약](docs/PARSER_OUTPUT_SPEC.md)에 정리했다.
 
 ## FastAPI 서버
 

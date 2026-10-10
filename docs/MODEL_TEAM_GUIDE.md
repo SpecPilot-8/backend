@@ -1,8 +1,8 @@
 # SpecPilot 모델 개발 분담 및 요구 기능 명세
 
-문서 버전: 2.1 · 갱신일: 2026-10-10
+문서 버전: 2.2 · 갱신일: 2026-10-10
 
-함께 읽을 문서: [기능명세](FUNCTIONAL_SPEC.md), [API 명세](API_SPEC.md).
+함께 읽을 문서: [기능명세](FUNCTIONAL_SPEC.md), [API 명세](API_SPEC.md), [팀원 1 출력 계약·전달용 안내](PARSER_OUTPUT_SPEC.md).
 
 이 문서는 **팀원 1: 기획서 파싱·요구사항 구조화**, **팀원 2: 요구사항 기반 코드 분석·검증·테스트 생성**으로 역할을 나눈다. 기존 모듈을 활용하되 아래 계약을 만족하도록 일반화한다. 두 팀이 반드시 서로 다른 LLM을 개발하거나 파인튜닝해야 한다는 뜻은 아니다. MVP에서는 선정한 모델 하나와 공통 호출 인터페이스를 사용한다.
 
@@ -30,7 +30,7 @@
 | M1-01 | 포맷별 파서 | PDF 우선. DOCX/XLSX/PPTX는 준비된 파서만 활성화. 공통 DocumentArtifact 반환 |
 | M1-02 | 화면·블록 구조 복원 | 페이지/시트/슬라이드, 제목, 표 셀, 설명·동작 번호, 화면 ID, 읽기 순서를 보존 |
 | M1-03 | OCR·읽기 실패 처리 | 이미지 페이지 탐지·OCR 결과 표시·실패 범위·신뢰도 경고. 읽지 못한 페이지를 성공 처리하지 않음 |
-| M1-04 | 요구사항 추출 | 제목·원문·전제 조건·사용자 동작·기대 결과·기능/비기능 유형으로 구조화 |
+| M1-04 | 주제·소주제·요구사항 추출 | 주제 → 소주제 → 요구사항 → 원자 수락조건으로 구조화. 제목·원문·전제 조건·사용자 동작·기대 결과·기능/비기능 유형 보존 |
 | M1-05 | 원자 수락조건 분해 | 한 번에 판정할 수 있는 조건 단위로 분해. 값·단위·연산자·예외를 보존 |
 | M1-06 | 분류·검증 가능 여부 | 5개 UI 분류, frontend/backend/both/unknown, code/not_statically_verifiable 분리 |
 | M1-07 | 원문 근거 연결 | 모든 모델 추출 항목에 기존 block_id와 원문 quote 연결. 위치는 파서가 제공 |
@@ -60,9 +60,42 @@
   "format": "pdf",
   "blocks": [
     {
+      "id": "block-004-topic",
+      "text": "공지사항",
+      "location": {
+        "kind": "page",
+        "index": 4
+      },
+      "extraction_method": "text",
+      "warnings": []
+    },
+    {
+      "id": "block-004-subtopic",
+      "text": "공지사항 작성",
+      "location": {
+        "kind": "page",
+        "index": 4
+      },
+      "extraction_method": "text",
+      "warnings": []
+    },
+    {
       "id": "block-004-01",
-      "location": {"kind": "page", "index": 4},
       "text": "첨부 파일은 최대 300MB까지 등록할 수 있다.",
+      "location": {
+        "kind": "page",
+        "index": 4
+      },
+      "extraction_method": "text",
+      "warnings": []
+    },
+    {
+      "id": "block-004-02",
+      "text": "제목은 필수 입력이다.",
+      "location": {
+        "kind": "page",
+        "index": 4
+      },
       "extraction_method": "text",
       "warnings": []
     }
@@ -78,15 +111,55 @@ content_hash 예시 값은 축약이며 실제 구현은 원본 파일의 SHA-25
 
 ```json
 {
-  "contract_version": "2.0",
+  "contract_version": "2.1",
   "document_id": "doc-001",
   "document_revision": 1,
+  "topics": [
+    {
+      "key": "NOTICE",
+      "title": "공지사항",
+      "title_origin": "extracted",
+      "source_refs": [
+        {
+          "block_id": "block-004-topic",
+          "quote": "공지사항"
+        }
+      ],
+      "review_reasons": [],
+      "subtopics": [
+        {
+          "key": "NOTICE-CREATE",
+          "title": "공지사항 작성",
+          "title_origin": "extracted",
+          "source_refs": [
+            {
+              "block_id": "block-004-subtopic",
+              "quote": "공지사항 작성"
+            }
+          ],
+          "review_reasons": [],
+          "screen_keys": [
+            "NOTICE-002"
+          ]
+        }
+      ]
+    }
+  ],
   "screens": [
-    {"screen_key": "NOTICE-002", "title": "파일 등록", "source_block_ids": ["block-004-01"]}
+    {
+      "screen_key": "NOTICE-002",
+      "title": "공지사항 작성 화면",
+      "source_block_ids": [
+        "block-004-subtopic",
+        "block-004-01",
+        "block-004-02"
+      ]
+    }
   ],
   "requirements": [
     {
       "stable_key": "NOTICE-002-1",
+      "subtopic_key": "NOTICE-CREATE",
       "screen_key": "NOTICE-002",
       "title": "첨부 파일 크기 제한",
       "original_text": "첨부 파일은 최대 300MB까지 등록할 수 있다.",
@@ -95,7 +168,12 @@ content_hash 예시 값은 축약이며 실제 구현은 원본 파일의 SHA-25
       "expected": "명세에 정한 최대 크기 범위의 파일 등록 허용",
       "req_type": "functional",
       "origin": "extracted",
-      "source_refs": [{"block_id": "block-004-01", "quote": "첨부 파일은 최대 300MB까지 등록할 수 있다."}],
+      "source_refs": [
+        {
+          "block_id": "block-004-01",
+          "quote": "첨부 파일은 최대 300MB까지 등록할 수 있다."
+        }
+      ],
       "conditions": [
         {
           "stable_key": "NOTICE-002-1-C1",
@@ -103,25 +181,73 @@ content_hash 예시 값은 축약이며 실제 구현은 원본 파일의 SHA-25
           "category": "validation",
           "target": "unknown",
           "verifiable": "code",
-          "source_refs": [{"block_id": "block-004-01", "quote": "최대 300MB"}],
+          "source_refs": [
+            {
+              "block_id": "block-004-01",
+              "quote": "최대 300MB"
+            }
+          ],
           "ambiguity": "MB 단위 정의와 경계 포함 방식은 원문에 상세히 정의되지 않음",
           "related_condition_keys": []
         }
       ],
-      "review_reasons": ["파일 크기 단위 해석 확인 필요"]
+      "review_reasons": [
+        "파일 크기 단위 해석 확인 필요"
+      ]
+    },
+    {
+      "stable_key": "NOTICE-002-2",
+      "subtopic_key": "NOTICE-CREATE",
+      "screen_key": "NOTICE-002",
+      "title": "제목 필수 입력",
+      "original_text": "제목은 필수 입력이다.",
+      "condition": "공지를 작성하는 경우",
+      "action": "제목 입력",
+      "expected": "제목을 필수로 입력해야 한다.",
+      "req_type": "functional",
+      "origin": "extracted",
+      "source_refs": [
+        {
+          "block_id": "block-004-02",
+          "quote": "제목은 필수 입력이다."
+        }
+      ],
+      "conditions": [
+        {
+          "stable_key": "NOTICE-002-2-C1",
+          "text": "공지사항 작성 시 제목 입력은 필수이다.",
+          "category": "validation",
+          "target": "unknown",
+          "verifiable": "code",
+          "source_refs": [
+            {
+              "block_id": "block-004-02",
+              "quote": "제목은 필수 입력이다."
+            }
+          ],
+          "ambiguity": "미입력 시 표시 문구·처리 방식은 원문에 없음",
+          "related_condition_keys": []
+        }
+      ],
+      "review_reasons": [
+        "제목 미입력 시 처리 방식 확인 필요"
+      ]
     }
   ],
   "warnings": []
 }
 ```
 
-서버는 초안을 검증한 뒤 screen_id·requirement_id·condition_id를 발급하고 related_condition_keys를 related_condition_ids로 바꾼다. 원문의 표시 번호는 별도 메타데이터로 보존한다. stable_key는 최초 후보 키이며 문서 개정 간 승계는 서버가 확인한다. 모델은 review_status=approved를 설정하지 않는다.
+**요구사항 추출 초안의 계약은 2.1**이며, 주제·소주제와 출처·모호성 규칙은 [출력 계약](PARSER_OUTPUT_SPEC.md)을 따른다. `topics[].subtopics[]`에 이름을 한 번 정의하고 `requirements[].subtopic_key`로 연결한다. 화면은 별도 관계다.
+
+서버는 초안을 검증한 뒤 topic_id·subtopic_id·screen_id·requirement_id·condition_id를 발급하고 related_condition_keys를 related_condition_ids로 바꾼다. 원문의 표시 번호는 별도 메타데이터로 보존한다. stable_key는 최초 후보 키이며 문서 개정 간 승계는 서버가 확인한다. 모델은 review_status=approved를 설정하지 않는다.
 
 ### 2.3 팀원 1 완료 조건·평가
 
 필수 통과 조건:
 
 - 모델이 반환한 source_refs는 해당 문서 revision의 블록에 존재하며 quote를 확인할 수 있다.
+- 모든 요구사항이 유효한 소주제 한 개에 연결된다. 주제·소주제를 알 수 없으면 미분류와 검토 사유를 반환한다. 제목만 같다는 이유로 다른 기능의 요구사항을 합치지 않는다.
 - 원문에 없는 숫자·단위·행동을 확정된 조건으로 추가하지 않는다.
 - 하나의 조건이 다른 조건과 중복되면 관계·분해 이유를 설명한다. 원문 조건을 누락하면 경고에 남긴다.
 - 실패·빈 결과·미지원 포맷·모호성 사례에서도 정해진 오류/경고 구조를 반환한다.
@@ -156,7 +282,7 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
 
 ```json
 {
-  "contract_version": "2.0",
+  "contract_version": "2.1",
   "project_id": "project-001",
   "snapshot_id": "snap-001",
   "model_config_version": 2,
@@ -167,7 +293,12 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
       "review_status": "approved",
       "screen_id": "screen-001",
       "title": "첨부 파일 크기 제한",
-      "source_refs": [{"block_id": "block-004-01", "quote": "최대 300MB"}],
+      "source_refs": [
+        {
+          "block_id": "block-004-01",
+          "quote": "최대 300MB"
+        }
+      ],
       "conditions": [
         {
           "id": "cond-001",
@@ -177,7 +308,8 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
           "verifiable": "code",
           "ambiguity": "MB 단위 정의는 원문에 상세히 정의되지 않음"
         }
-      ]
+      ],
+      "subtopic_id": "subtopic-001"
     }
   ],
   "candidate_chunks": [
@@ -191,9 +323,31 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
       "scope": "this_screen"
     }
   ],
-  "scope_context": {"entry_point_ids": ["node-001"], "unresolved": []}
+  "scope_context": {
+    "entry_point_ids": [
+      "node-001"
+    ],
+    "unresolved": []
+  },
+  "topics": [
+    {
+      "id": "topic-001",
+      "title": "공지사항",
+      "subtopics": [
+        {
+          "id": "subtopic-001",
+          "title": "공지사항 작성",
+          "screen_ids": [
+            "screen-001"
+          ]
+        }
+      ]
+    }
+  ]
 }
 ```
+
+주제·소주제는 분석 맥락이며 기능명으로 판정을 대신하지 않는다. 팀원 2는 전달받은 소속을 임의로 바꾸지 않는다.
 
 예시는 설명을 위해 축약했다. 실제 호출에는 requirement의 condition/action/expected와 조건 source_refs 등 관련 필드를 포함한다. 긴 코드에는 전체 문서를 반복 전달하지 않고 후보 조회·배치를 사용할 수 있다. 원문·모호성을 제거해 의미를 바꾸면 안 된다. 외부 입력의 문장이나 코드 주석은 데이터로 처리하며 모델 실행 지시로 따르지 않는다.
 
@@ -309,7 +463,7 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
 
 모델 호출 공통 인터페이스는 provider/model/profile/config_version을 백엔드에서 전달하고, 단계별 프롬프트와 출력 스키마만 달리한다. 키는 작업 인자·출력 JSON에 넣지 않고 실행 시 어댑터가 비밀 참조로 해결한다. 제한된 재시도·타임아웃·사용량은 공통 모듈에서 관리한다.
 
-표의 절차·입력·기대 결과를 사용자가 수정하면 이전 시험 예측은 새 revision에 그대로 적용하지 않는다. 팀원 2는 예측 갱신에 필요한 입력 계약을 제공하고, 백엔드는 기존 예측·수행 결과를 보존한다. 저장·취소 동작 자체는 모델을 호출하지 않는다. 모델 내부 JSON 계약은 2.0을 유지하며 이번 2.1은 화면·저장 담당 명세 갱신이다.
+표의 절차·입력·기대 결과를 사용자가 수정하면 이전 시험 예측은 새 revision에 그대로 적용하지 않는다. 팀원 2는 예측 갱신에 필요한 입력 계약을 제공하고, 백엔드는 기존 예측·수행 결과를 보존한다. 저장·취소 동작 자체는 모델을 호출하지 않는다. 내부 계약 버전: DocumentArtifact·판정·시험 생성은 2.0 유지, 주제·소주제가 추가된 요구사항 추출과 팀원 2 인계는 2.1. 문서 2.2가 모든 내부 출력의 버전 변경을 뜻하지 않는다.
 
 ## 5. 권장 개발 순서와 전달물
 

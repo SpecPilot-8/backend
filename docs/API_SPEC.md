@@ -1,6 +1,6 @@
 # SpecPilot API 명세서
 
-버전: 목표 계약 2.1 · 갱신일: 2026-10-10
+버전: 목표 계약 2.2 · 갱신일: 2026-10-10
 
 관련 문서: [기능명세](FUNCTIONAL_SPEC.md), [모델 담당·내부 입출력](MODEL_TEAM_GUIDE.md).
 
@@ -68,6 +68,7 @@ JobOut: `id,project_id,operation,status,snapshot_id,model_config_snapshot,missin
 | `document.parse_status` | uploaded / parsing / parsed / partial / failed |
 | `requirement.review_status` | pending / needs_review / approved |
 | `requirement.analysis_state` | not_run / running / completed / failed / blocked |
+| `topic.title_origin` / `subtopic.title_origin` | extracted / inferred / unclassified |
 | `condition.category` | validation / navigation / business_logic / data / error_message |
 | `condition.target` | frontend / backend / both / unknown |
 | `requirement.req_type` | functional / non_functional |
@@ -87,8 +88,10 @@ UI 한국어 라벨은 기능명세를 따른다. 계약 데이터와 출력물�
 | Project | id, name, version, created_at, selected_model_profile_id(nullable) |
 | Document | id, project_id, filename, format, content_hash, revision, parse_status, warnings |
 | SourceBlock | id, document_id, document_revision, location, text, extraction_method, warnings |
+| Topic | id, document_id, document_revision, key, title, title_origin, source_refs, review_reasons |
+| Subtopic | id, topic_id, document_id, document_revision, key, title, title_origin, source_refs, review_reasons, screen_ids[] |
 | Screen | id, screen_key, title, source_block_ids |
-| Requirement | id, stable_key, screen_id, title, original_text, condition, action, expected, req_type, revision, review_status, source_refs, conditions[] |
+| Requirement | id, stable_key, subtopic_id, screen_id(nullable), title, original_text, condition, action, expected, req_type, revision, review_status, source_refs, conditions[] |
 | Condition | id, stable_key, text, category, target, verifiable, source_refs, ambiguity, related_condition_ids[] |
 | Snapshot | id, project_id, content_hash, status, source_kind, file_count, chunk_count, warnings |
 | Chunk | id, snapshot_id, relative file_path, start_line, end_line, symbol, content |
@@ -133,15 +136,18 @@ ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabiliti
 | GET | `/projects/{p}/documents/{d}/blocks` | location_kind,index,limit,offset → Page[SourceBlock] |
 | GET | `/projects/{p}/documents/{d}/outline` | → `{document_revision,items:[{title,location,block_ids}]}` |
 | POST | `/projects/{p}/documents/{d}/requirements/extract` | `{document_revision,model_config_version}` → 202 Job |
-| GET | `/projects/{p}/requirements` | review_status,screen_id,q,limit,offset → Page[Requirement] |
+| GET | `/projects/{p}/documents/{d}/requirement-groups` | document_revision → `{document_revision,topics:[Topic + subtopics[]]}` |
+| GET | `/projects/{p}/requirements` | document_id,document_revision,topic_id,subtopic_id,review_status,screen_id,q,limit,offset → Page[Requirement] |
 | GET | `/projects/{p}/requirements/{r}` | revision 생략 시 최신 → Requirement |
 | POST | `/projects/{p}/requirements` | 수동 추가 Requirement 내용 → 201 Requirement |
-| PATCH | `/projects/{p}/requirements/{r}` | `{base_revision,title?,condition?,action?,expected?,conditions?}` → 새 revision |
+| PATCH | `/projects/{p}/requirements/{r}` | `{base_revision,subtopic_id?,title?,condition?,action?,expected?,conditions?}` → 새 revision |
 | PUT | `/projects/{p}/requirements/{r}/review` | `{base_revision,status:"approved"}` → 새 revision·review_status |
 
 문서 업로드 기본 제한 20MiB(현행 Settings 값). v2 구현에서는 실제 적용·반환하는 지원 포맷 및 한도를 capabilities로 공개한다. 확장자·내용 검증, 압축/이미지 처리 제한을 둔다. 파일 읽기 실패를 빈 명세 성공으로 반환하지 않는다.
 
-추출 요청은 parsed 또는 경고를 확인한 partial 문서에만 허용한다. 실행 결과 요구사항은 검토 전 상태다. 팀원 1의 내부 결과를 서버가 검증·ID 부여·저장한다. PATCH conditions는 해당 revision의 전체 조건 목록으로 교체하며 삭제된 조건도 과거 revision에 보존한다. 수정하면 approved를 pending으로 되돌린다. 검토 확정 요청도 revision을 증가시키므로 이후 검증에는 반환된 revision을 쓴다.
+추출 요청은 parsed 또는 경고를 확인한 partial 문서에만 허용한다. 실행 결과 요구사항은 검토 전 상태다. 팀원 1의 내부 결과를 서버가 검증·ID 부여·저장한다. 내부 추출 계약 2.1의 주제·소주제 키와 출처는 [출력 계약](PARSER_OUTPUT_SPEC.md), [JSON Schema](schemas/requirement-extraction.schema.json)를 따른다. 서버는 key를 topic_id·subtopic_id로 치환하고 사용자 검토 상태를 지정한다. PATCH conditions는 해당 revision의 전체 조건 목록으로 교체하며 삭제된 조건도 과거 revision에 보존한다. 수정하면 approved를 pending으로 되돌린다. 검토 확정 요청도 revision을 증가시키므로 이후 검증에는 반환된 revision을 쓴다.
+
+그룹 조회와 요구사항 목록은 같은 문서 revision을 지정해 사용한다. topic_id·subtopic_id·screen_id는 선택 문서 revision 소속을 검사하고 서로 충돌하는 필터 조합은 422로 거부한다. 주제·소주제의 제목만으로 다른 문서를 합치지 않는다. PATCH의 subtopic_id도 같은 문서 revision에서만 허용하고 새 요구사항 revision을 생성한다. 새 주제·소주제를 직접 생성·이름 변경하는 API는 후속 범위다. 수동 추가에서도 subtopic_id를 지정하며 미분류 그룹은 서버가 해당 문서 revision에 생성할 수 있다. 추적표 행은 `topic_id,subtopic_id,topic_title,subtopic_title`도 포함해 경로를 표시한다. 과거 실행에는 당시 그룹 경로를 보존하며 최신 문서의 이름으로 바꾸지 않는다.
 
 출처 인용은 원문 블록 텍스트와 일치해야 한다. 사용자 작성 추가 조건은 `origin:"manual"`, `source_refs:[]`와 작성 이유를 허용하지만 모델 추출 조건에 출처 생략을 허용하지 않는다.
 
