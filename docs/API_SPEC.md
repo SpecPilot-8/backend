@@ -1,6 +1,6 @@
 # SpecPilot API 명세서
 
-버전: 목표 계약 2.2 · 갱신일: 2026-10-10
+버전: 목표 계약 2.3 · 갱신일: 2026-10-10
 
 관련 문서: [기능명세](FUNCTIONAL_SPEC.md), [모델 담당·내부 입출력](MODEL_TEAM_GUIDE.md).
 
@@ -87,12 +87,12 @@ UI 한국어 라벨은 기능명세를 따른다. 계약 데이터와 출력물�
 |---|---|
 | Project | id, name, version, created_at, selected_model_profile_id(nullable) |
 | Document | id, project_id, filename, format, content_hash, revision, parse_status, warnings |
-| SourceBlock | id, document_id, document_revision, location, text, extraction_method, warnings |
+| SourceBlock | id, document_id, document_revision, location, text, extraction_method, structure(section/label/parent_block_id/reading_order), warnings |
 | Topic | id, document_id, document_revision, key, title, title_origin, source_refs, review_reasons |
 | Subtopic | id, topic_id, document_id, document_revision, key, title, title_origin, source_refs, review_reasons, screen_ids[] |
-| Screen | id, screen_key, title, source_block_ids |
-| Requirement | id, stable_key, subtopic_id, screen_id(nullable), title, original_text, condition, action, expected, req_type, revision, review_status, source_refs, conditions[] |
-| Condition | id, stable_key, text, category, target, verifiable, source_refs, ambiguity, related_condition_ids[] |
+| Screen | id, screen_key, title, source_title, source_screen_id(nullable), depth_path[], view_type, base_screen_id(nullable), source_block_ids |
+| Requirement | id, stable_key, subtopic_id, screen_id(nullable), title, original_text, source_markers[], condition, action, expected, req_type, revision, review_status, source_refs, conditions[] |
+| Condition | id, stable_key, text, category, target, verifiable, source_refs, constraint(nullable), ambiguity, related_condition_ids[] |
 | Snapshot | id, project_id, content_hash, status, source_kind, file_count, chunk_count, warnings |
 | Chunk | id, snapshot_id, relative file_path, start_line, end_line, symbol, content |
 | VerificationRun | id, snapshot_id, requirement_versions[], model_config_snapshot, prompt_version, rules_version, status |
@@ -103,6 +103,8 @@ UI 한국어 라벨은 기능명세를 따른다. 계약 데이터와 출력물�
 SourceRef = `{block_id,quote}`. **소스 위치는 서버가 SourceBlock을 조인해 채운다.** `location`은 `{kind:"page",index:4,bbox:[x,y,w,h]}` 또는 sheet/slide/section 형태다. index는 1부터 시작하며 bbox는 선택 사항이다. 텍스트 오프셋을 쓰는 경우 단위는 Unicode 코드 포인트, 시작 포함·끝 제외다.
 
 요구사항 stable_key는 문서 표시 번호와 구분한다. 개정 시 승계는 출처·변경 비교로 결정하며 모델이 임의로 확정하지 않는다. Condition ID는 해당 요구사항 revision의 항목이다. 변경 버전의 대응 관계는 별도로 기록한다.
+
+source_screen_id는 원문 화면 번호이며 시험번호(test_no)와 서버 DB ID를 구분한다. 예: PDF의 LOGIN-002는 회원가입 화면이고 Excel의 LOGIN-002는 로그인 오류 시험번호이므로 이름이 같다고 연결하지 않는다. 원문 번호는 표시·추적용이며 DB ID로 사용하지 않는다.
 
 ## 4. 프로젝트·지원 기능·모델 API (개발 목표)
 
@@ -145,7 +147,7 @@ ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabiliti
 
 문서 업로드 기본 제한 20MiB(현행 Settings 값). v2 구현에서는 실제 적용·반환하는 지원 포맷 및 한도를 capabilities로 공개한다. 확장자·내용 검증, 압축/이미지 처리 제한을 둔다. 파일 읽기 실패를 빈 명세 성공으로 반환하지 않는다.
 
-추출 요청은 parsed 또는 경고를 확인한 partial 문서에만 허용한다. 실행 결과 요구사항은 검토 전 상태다. 팀원 1의 내부 결과를 서버가 검증·ID 부여·저장한다. 내부 추출 계약 2.1의 주제·소주제 키와 출처는 [출력 계약](PARSER_OUTPUT_SPEC.md), [JSON Schema](schemas/requirement-extraction.schema.json)를 따른다. 서버는 key를 topic_id·subtopic_id로 치환하고 사용자 검토 상태를 지정한다. PATCH conditions는 해당 revision의 전체 조건 목록으로 교체하며 삭제된 조건도 과거 revision에 보존한다. 수정하면 approved를 pending으로 되돌린다. 검토 확정 요청도 revision을 증가시키므로 이후 검증에는 반환된 revision을 쓴다.
+추출 요청은 parsed 또는 경고를 확인한 partial 문서에만 허용한다. 실행 결과 요구사항은 검토 전 상태다. 팀원 1의 내부 결과를 서버가 검증·ID 부여·저장한다. 내부 추출 계약 2.2의 주제·소주제 키와 출처는 [출력 계약](PARSER_OUTPUT_SPEC.md), [JSON Schema](schemas/requirement-extraction.schema.json)를 따른다. 서버는 key를 topic_id·subtopic_id로, base_screen_key를 base_screen_id로 치환하고 사용자 검토 상태를 지정한다. PATCH conditions는 해당 revision의 전체 조건 목록으로 교체하며 삭제된 조건도 과거 revision에 보존한다. 수정하면 approved를 pending으로 되돌린다. 검토 확정 요청도 revision을 증가시키므로 이후 검증에는 반환된 revision을 쓴다.
 
 그룹 조회와 요구사항 목록은 같은 문서 revision을 지정해 사용한다. topic_id·subtopic_id·screen_id는 선택 문서 revision 소속을 검사하고 서로 충돌하는 필터 조합은 422로 거부한다. 주제·소주제의 제목만으로 다른 문서를 합치지 않는다. PATCH의 subtopic_id도 같은 문서 revision에서만 허용하고 새 요구사항 revision을 생성한다. 새 주제·소주제를 직접 생성·이름 변경하는 API는 후속 범위다. 수동 추가에서도 subtopic_id를 지정하며 미분류 그룹은 서버가 해당 문서 revision에 생성할 수 있다. 추적표 행은 `topic_id,subtopic_id,topic_title,subtopic_title`도 포함해 경로를 표시한다. 과거 실행에는 당시 그룹 경로를 보존하며 최신 문서의 이름으로 바꾸지 않는다.
 
@@ -195,7 +197,7 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
   "requirement_id": "req-001",
   "requirement_revision": 3,
   "status": "mismatch",
-  "reason": "명세는 300MB인데 분석 범위의 검사 값은 50MB입니다.",
+  "reason": "명세는 50MB인데 분석 범위의 검사 값은 50MB입니다.",
   "condition_verdicts": [
     {
       "condition_id": "cond-001",
@@ -280,7 +282,7 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
   "title": "첨부 파일 최대 허용 크기 확인",
   "type": "boundary",
   "preconditions": "첨부 가능한 사용자 계정과 테스트 파일 준비",
-  "input_data": "문서 정의에 맞춘 300MB 파일",
+  "input_data": "문서 정의에 맞춘 50MB 파일",
   "steps": ["파일 등록 화면을 연다.", "파일을 선택하고 저장한다."],
   "expected": "명세에 정한 허용 범위의 파일이 등록된다."
 }
@@ -299,7 +301,7 @@ type은 positive/negative/boundary, steps는 1..100개의 순서 있는 문자�
   "base_version": 1,
   "client_edit_id": "b5a030a3-66c9-45c7-a0de-df6e1073097d",
   "status": "failed",
-  "actual": "허용 범위 파일이 50MB 제한 메시지와 함께 거부됨",
+  "actual": "허용 범위 파일이 10MB 제한 메시지와 함께 거부됨",
   "notes": "시험 환경과 화면 캡처 식별자 기록",
   "performed_at": "2026-10-10T05:00:00Z"
 }
@@ -332,7 +334,7 @@ type은 positive/negative/boundary, steps는 1..100개의 순서 있는 문자�
       "test_case_id": "tc-003",
       "base_test_case_revision": 1,
       "procedure": {
-        "input_data": "단위가 확인된 300MB 파일",
+        "input_data": "단위가 확인된 50MB 파일",
         "steps": ["공지사항 등록 화면에서 파일을 선택한다.", "저장을 눌러 실제 동작을 확인한다."],
         "expected": "명세 허용 범위의 파일이 정상 등록된다."
       },
@@ -340,7 +342,7 @@ type은 positive/negative/boundary, steps는 1..100개의 순서 있는 문자�
         "operation": "create",
         "bind_to": "after_save",
         "status": "failed",
-        "actual": "300MB 파일이 50MB 제한 메시지와 함께 거부됨",
+        "actual": "50MB 파일이 10MB 제한 메시지와 함께 거부됨",
         "notes": "QA 환경에서 수행한 결과",
         "performed_at": "2026-10-10T05:00:00Z"
       }

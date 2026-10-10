@@ -1,5 +1,5 @@
 {
-  "contract_version": "2.1",
+  "contract_version": "2.2",
   "document_id": "doc-unclassified",
   "document_revision": 1,
   "topics": [
@@ -32,7 +32,7 @@
       "subtopic_key": "UNCLASSIFIED-FUNCTION",
       "screen_key": null,
       "title": "첨부 파일 크기 제한",
-      "original_text": "첨부 파일은 최대 300MB까지 등록할 수 있다.",
+      "original_text": "첨부 파일은 최대 50MB까지 등록할 수 있다.",
       "condition": "첨부 파일을 등록하는 경우",
       "action": "파일 등록",
       "expected": "명세에 정한 최대 크기 범위의 파일 등록 허용",
@@ -41,30 +41,38 @@
       "source_refs": [
         {
           "block_id": "block-004-01",
-          "quote": "첨부 파일은 최대 300MB까지 등록할 수 있다."
+          "quote": "첨부 파일은 최대 50MB까지 등록할 수 있다."
         }
       ],
       "conditions": [
         {
           "stable_key": "NOTICE-002-1-C1",
-          "text": "첨부 파일 크기 제한은 최대 300MB이다.",
+          "text": "첨부 파일 크기 제한은 최대 50MB이다.",
           "category": "validation",
           "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
               "block_id": "block-004-01",
-              "quote": "최대 300MB"
+              "quote": "최대 50MB"
             }
           ],
-          "ambiguity": "MB 단위 정의와 경계 포함 방식은 원문에 상세히 정의되지 않음",
-          "related_condition_keys": []
+          "ambiguity": "MB 바이트 정의은 원문에 상세히 정의되지 않음",
+          "related_condition_keys": [],
+          "constraint": {
+            "field": "notice.attachment.size",
+            "operator": "le",
+            "value": 50,
+            "unit": "MB",
+            "unit_definition": null
+          }
         }
       ],
       "review_reasons": [
         "파일 크기 단위 해석 확인 필요",
         "기능 소속 및 화면 연결 확인 필요"
-      ]
+      ],
+      "source_markers": []
     },
     {
       "stable_key": "NOTICE-002-2",
@@ -97,13 +105,15 @@
             }
           ],
           "ambiguity": "미입력 시 표시 문구·처리 방식은 원문에 없음",
-          "related_condition_keys": []
+          "related_condition_keys": [],
+          "constraint": null
         }
       ],
       "review_reasons": [
         "제목 미입력 시 처리 방식 확인 필요",
         "기능 소속 및 화면 연결 확인 필요"
-      ]
+      ],
+      "source_markers": []
     }
   ],
   "warnings": [
