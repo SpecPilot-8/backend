@@ -1,0 +1,51 @@
+{
+  "contract_version": "2.0",
+  "document_id": "doc-001",
+  "document_revision": 1,
+  "content_hash": "sha256:example",
+  "format": "pdf",
+  "blocks": [
+    {
+      "id": "block-004-topic",
+      "text": "공지사항",
+      "location": {
+        "kind": "page",
+        "index": 4
+      },
+      "extraction_method": "text",
+      "warnings": []
+    },
+    {
+      "id": "block-004-subtopic",
+      "text": "공지사항 작성",
+      "location": {
+        "kind": "page",
+        "index": 4
+      },
+      "extraction_method": "text",
+      "warnings": []
+    },
+    {
+      "id": "block-004-01",
+      "text": "첨부 파일은 최대 300MB까지 등록할 수 있다.",
+      "location": {
+        "kind": "page",
+        "index": 4
+      },
+      "extraction_method": "text",
+      "warnings": []
+    },
+    {
+      "id": "block-004-02",
+      "text": "제목은 필수 입력이다.",
+      "location": {
+        "kind": "page",
+        "index": 4
+      },
+      "extraction_method": "text",
+      "warnings": []
+    }
+  ],
+  "unread_locations": [],
+  "warnings": []
+}
