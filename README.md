@@ -4,7 +4,8 @@
 판정마다 근거 코드 위치를 붙여, 사람이 결과를 검증할 수 있게 하는 것이 목표다.
 
 설계 배경과 원칙은 [CLAUDE.md](CLAUDE.md), 판정 기준은 [docs/label-definition.md](docs/label-definition.md)에 있다.
-MVP의 목표 기능·입출력·완료 조건과 현재 구현 상태는 [기능명세서](docs/FUNCTIONAL_SPEC.md)에 정리했다.
+VS Code 스타일 웹앱의 화면 흐름·목표 기능·완료 조건과 현재 구현 상태는 [기능명세서](docs/FUNCTIONAL_SPEC.md)에 정리했다.
+현재 API와 새 UI를 위한 v2 개발 계약은 [API 명세서](docs/API_SPEC.md), 문서 분석·코드 분석 팀원의 요구 기능과 인계 데이터는 [모델 개발 담당 명세](docs/MODEL_TEAM_GUIDE.md)를 따른다.
 
 ## FastAPI 서버
 
@@ -19,8 +20,8 @@ python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 
 Swagger: <http://127.0.0.1:8000/docs>. 현재 연결된 기능은 `/api/v1/capabilities`에서 확인한다.
 기본 DB는 `.data/api.sqlite3`이며 `SPECPILOT_DATABASE_URL`로 PostgreSQL URL을 설정할 수 있다.
-업로드 원본은 `.data/uploads/`에 저장한다. `SPECPILOT_WORKSPACE_ROOT`로 허용 프로젝트 루트를 지정한다.
-AI 호출은 연결하지 않았으며 키를 저장하지 않는다. 일본어 번역과 다중 모델 지원은 제외한다.
+문서 API 기능 브랜치에서는 업로드 원본을 `.data/uploads/`에 저장하도록 구성했다. 현재 체크아웃의 연결 범위는 아래 목록을 따른다. `SPECPILOT_WORKSPACE_ROOT`로 허용 프로젝트 루트를 지정한다.
+HTTP AI 호출은 연결하지 않았으며 키를 저장하지 않는다. 일본어 번역은 제외한다. MVP는 모델 하나를 사용하고, 지원 프로필·키를 통한 여러 모델 전환은 후속 확장이다.
 API의 `api_*` 테이블은 기존 CLI 샘플 테이블과 분리한다. 현재는 로컬 개발용이며 인증·운영 마이그레이션은 미구현이다.
 
 현재 구현 범위:
