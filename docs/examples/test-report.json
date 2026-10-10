@@ -1,0 +1,69 @@
+{
+  "report_contract_version": "1.0",
+  "template_id": "thinktree-test-spec-v1",
+  "metadata": {
+    "project_name": "[ThinkTree] SpecPilot 구축",
+    "target_menu_name": "specPilot",
+    "specification_author": null,
+    "specification_date": "2026-09-07",
+    "test_reviewer": "씽크트리",
+    "test_date": null
+  },
+  "revision_history": [],
+  "sections": [
+    {
+      "key": "notice",
+      "sheet_name": "04. 공지사항",
+      "menu_title": "공지사항",
+      "menu_code": "04",
+      "rows": [
+        {
+          "test_no": "NOTICE-CREATE-001",
+          "depth_1": "공지사항",
+          "depth_2": "신규등록",
+          "step_no": 1,
+          "procedure": "관리자 계정으로 신규 등록 버튼을 클릭한다.",
+          "expected": "공지사항 신규등록 화면으로 이동한다.",
+          "account": "관리자",
+          "input_data": "${qa_admin_email}",
+          "data_notes": null,
+          "confirmation": null
+        },
+        {
+          "test_no": "NOTICE-CREATE-001",
+          "depth_1": "공지사항",
+          "depth_2": "신규등록",
+          "step_no": 2,
+          "procedure": "제목, 게시기간, 게시여부, 고정여부, 게시 내용을 입력한다.",
+          "expected": "입력값이 화면에 표시되고 글자수가 표시된다.",
+          "account": null,
+          "input_data": "제목 50자 이내 / 내용 2000자 이내",
+          "data_notes": null,
+          "confirmation": null
+        },
+        {
+          "test_no": "NOTICE-CREATE-001",
+          "depth_1": "공지사항",
+          "depth_2": "신규등록",
+          "step_no": 3,
+          "procedure": "저장 버튼을 클릭한다.",
+          "expected": "공지사항이 등록되고 상세 화면으로 이동한다.",
+          "account": null,
+          "input_data": "정상 입력 데이터",
+          "data_notes": null,
+          "confirmation": null
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "code": "REFERENCE_EXPECTATION_UNCONFIRMED",
+      "message": "22행 상세 화면 이동은 Excel 예시 문구입니다. PDF 9쪽 저장 Action D는 잘려 있어 이 문구를 명세 확정값으로 사용할 수 없습니다."
+    },
+    {
+      "code": "REFERENCE_INPUT_REPLACED",
+      "message": "20행 계정 이메일 입력은 공유용 시험 데이터 참조로 대체했습니다. 원본을 변경하지 않았습니다."
+    }
+  ]
+}
