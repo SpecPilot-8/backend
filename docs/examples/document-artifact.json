@@ -1,51 +1,175 @@
 {
-  "contract_version": "2.0",
-  "document_id": "doc-001",
+  "contract_version": "2.1",
+  "document_id": "doc-hansung-v02",
   "document_revision": 1,
-  "content_hash": "sha256:example",
+  "content_hash": "sha256:8bd53f2c9c985d1fa4880436560788098519fe0cd9a96ce2dc473f4c9490d12d",
   "format": "pdf",
   "blocks": [
     {
-      "id": "block-004-topic",
-      "text": "공지사항",
+      "id": "p09-header",
       "location": {
         "kind": "page",
-        "index": 4
+        "index": 9
       },
-      "extraction_method": "text",
+      "text": "Depth: 공지사항 관리\n화면명: 공지사항 등록\n화면 ID: NOTICE-002\n작성자: THINKTREE",
+      "extraction_method": "manual_transcription",
+      "structure": {
+        "section": "header",
+        "label": null,
+        "parent_block_id": null,
+        "reading_order": 1
+      },
       "warnings": []
     },
     {
-      "id": "block-004-subtopic",
-      "text": "공지사항 작성",
+      "id": "p09-description-1",
       "location": {
         "kind": "page",
-        "index": 4
+        "index": 9
       },
+      "text": "공지사항의제목을 작성하며, 제목은 50자까지 입력할 수있다. 50자가넘어가면입력을 할수없으며, 입력창의오른쪽 아래입\n력한글자수가표시된다.",
       "extraction_method": "text",
+      "structure": {
+        "section": "description",
+        "label": "1",
+        "parent_block_id": null,
+        "reading_order": 2
+      },
       "warnings": []
     },
     {
-      "id": "block-004-01",
-      "text": "첨부 파일은 최대 300MB까지 등록할 수 있다.",
+      "id": "p09-description-7",
       "location": {
         "kind": "page",
-        "index": 4
+        "index": 9
       },
+      "text": "공지사항에포함되는첨부파일이저장되며, 첨부파일은하나만 업로드 가능하다. 첨부파일을업로드하게되면입력창 안에첨부\n파일의 이름이 넣어지며넣은첨부파일은창안에 x버튼으로삭제할 수있다.\n(1) 첨부파일은50MB이하의 파일만 업로드 가능하며, 50MB초과일 시, 다음과 같이에러메시지가표시된다.\n* error-msg: 첨부파일의크기는 50MB이하만 가능합니다.",
       "extraction_method": "text",
+      "structure": {
+        "section": "description",
+        "label": "7",
+        "parent_block_id": null,
+        "reading_order": 3
+      },
       "warnings": []
     },
     {
-      "id": "block-004-02",
-      "text": "제목은 필수 입력이다.",
+      "id": "p10-header",
       "location": {
         "kind": "page",
-        "index": 4
+        "index": 10
       },
-      "extraction_method": "text",
+      "text": "Depth: 공지사항 관리\n화면명: 공지사항 등록(취소)\n화면 ID: NOTICE-003\n작성자: THINKTREE",
+      "extraction_method": "manual_transcription",
+      "structure": {
+        "section": "header",
+        "label": null,
+        "parent_block_id": null,
+        "reading_order": 4
+      },
       "warnings": []
+    },
+    {
+      "id": "p10-action-A",
+      "location": {
+        "kind": "page",
+        "index": 10
+      },
+      "text": "팝업이 없어지고입력한 신규등록화면으로돌아간다.",
+      "extraction_method": "text",
+      "structure": {
+        "section": "action",
+        "label": "A",
+        "parent_block_id": null,
+        "reading_order": 5
+      },
+      "warnings": []
+    },
+    {
+      "id": "p10-action-B",
+      "location": {
+        "kind": "page",
+        "index": 10
+      },
+      "text": "신규등록화면에서등록한 내용을 취소하고공지사항목록으로이동한다.",
+      "extraction_method": "text",
+      "structure": {
+        "section": "action",
+        "label": "B",
+        "parent_block_id": null,
+        "reading_order": 6
+      },
+      "warnings": []
+    },
+    {
+      "id": "p05-description-0",
+      "location": {
+        "kind": "page",
+        "index": 5
+      },
+      "text": "비밀번호재설정을위한요소인 이메일, 이름을 요구하는창이있다.",
+      "extraction_method": "text",
+      "structure": {
+        "section": "description",
+        "label": "0",
+        "parent_block_id": null,
+        "reading_order": 7
+      },
+      "warnings": []
+    },
+    {
+      "id": "p05-description-2",
+      "location": {
+        "kind": "page",
+        "index": 5
+      },
+      "text": "회원가입시입력한 비밀번호를입력한다.",
+      "extraction_method": "text",
+      "structure": {
+        "section": "description",
+        "label": "2",
+        "parent_block_id": null,
+        "reading_order": 8
+      },
+      "warnings": []
+    },
+    {
+      "id": "p09-action-D",
+      "location": {
+        "kind": "page",
+        "index": 9
+      },
+      "text": "제목, 게시 시작일, 게시 종료일, 게시 내용을확",
+      "extraction_method": "text",
+      "structure": {
+        "section": "action",
+        "label": "D",
+        "parent_block_id": null,
+        "reading_order": 9
+      },
+      "warnings": [
+        {
+          "code": "SOURCE_TRUNCATED",
+          "message": "문장이 원본에서 잘려 있습니다."
+        }
+      ]
     }
   ],
   "unread_locations": [],
-  "warnings": []
+  "warnings": [
+    {
+      "code": "REFERENCE_EXCERPT",
+      "message": "사람이 검토한 5·9·10쪽 일부 발췌 예시입니다. 전체 15쪽 파싱 완료 결과가 아닙니다.",
+      "block_ids": [
+        "p09-header",
+        "p09-description-1",
+        "p09-description-7",
+        "p10-header",
+        "p10-action-A",
+        "p10-action-B",
+        "p05-description-0",
+        "p05-description-2"
+      ]
+    }
+  ]
 }

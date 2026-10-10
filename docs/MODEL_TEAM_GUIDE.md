@@ -1,6 +1,6 @@
 # SpecPilot 모델 개발 분담 및 요구 기능 명세
 
-문서 버전: 2.2 · 갱신일: 2026-10-10
+문서 버전: 2.3 · 갱신일: 2026-10-10
 
 함께 읽을 문서: [기능명세](FUNCTIONAL_SPEC.md), [API 명세](API_SPEC.md), [팀원 1 출력 계약·전달용 안내](PARSER_OUTPUT_SPEC.md).
 
@@ -43,7 +43,7 @@
 수락조건 예:
 
 - ‘중복 이메일로 가입하면 오류를 표시하고 저장하지 않는다’는 중복 검출·오류 표시·저장 방지 조건으로 나눌 수 있다.
-- ‘첨부 최대 300MB’는 300과 MB를 보존한다. 문서가 경계 포함 여부·MB 정의를 밝히지 않았다면 가정을 확정하지 않고 ambiguity에 기록한다.
+- ‘첨부 최대 50MB’는 50과 MB를 보존한다. 문서가 MB 바이트 정의를 밝히지 않았다면 가정을 확정하지 않고 ambiguity에 기록한다.
 - ‘확인 버튼 클릭 시 목록으로 이동’은 해당 화면의 동작·목적지 조건이다. 목적지의 모든 기능을 이 조건에 추가하지 않는다.
 - 색상·실제 화면 배치 등 코드만으로 보장하기 어려운 조건은 정적 검증 불가로 남긴다. 입력값·메시지 처리 등 코드로 확인 가능한 조건까지 함께 제외하지 않는다.
 
@@ -51,196 +51,13 @@
 
 파서가 먼저 DocumentArtifact를 만든다. 서버가 원본을 보관하고 document_id·revision을 발급한다. 팀원 1의 파서는 서버에서 받은 문서 ID를 그대로 사용하며 블록별 고유 ID를 만든다.
 
-```json
-{
-  "contract_version": "2.0",
-  "document_id": "doc-001",
-  "document_revision": 1,
-  "content_hash": "sha256:example",
-  "format": "pdf",
-  "blocks": [
-    {
-      "id": "block-004-topic",
-      "text": "공지사항",
-      "location": {
-        "kind": "page",
-        "index": 4
-      },
-      "extraction_method": "text",
-      "warnings": []
-    },
-    {
-      "id": "block-004-subtopic",
-      "text": "공지사항 작성",
-      "location": {
-        "kind": "page",
-        "index": 4
-      },
-      "extraction_method": "text",
-      "warnings": []
-    },
-    {
-      "id": "block-004-01",
-      "text": "첨부 파일은 최대 300MB까지 등록할 수 있다.",
-      "location": {
-        "kind": "page",
-        "index": 4
-      },
-      "extraction_method": "text",
-      "warnings": []
-    },
-    {
-      "id": "block-004-02",
-      "text": "제목은 필수 입력이다.",
-      "location": {
-        "kind": "page",
-        "index": 4
-      },
-      "extraction_method": "text",
-      "warnings": []
-    }
-  ],
-  "unread_locations": [],
-  "warnings": []
-}
-```
+파서 계약은 **DocumentArtifact 2.1**, 의미 추출은 **RequirementExtractionDraft 2.2**다. 실제 PDF 5·9·10쪽의 일부 발췌를 사람이 확인해 만든 [문서 블록 예시](examples/document-artifact.json)와 [전체 추출 예시](examples/requirement-extraction.json)를 기준으로 한다. 전체 15쪽의 자동 분석 완료 결과는 아니다.
 
-content_hash 예시 값은 축약이며 실제 구현은 원본 파일의 SHA-256을 계산한다. extraction_method는 text/ocr, 페이지 번호는 1부터다. 표·문단·좌표를 복원할 수 있으면 추가 메타데이터로 제공한다.
+원문 Depth·화면명·화면 ID·Description 번호·Action/Event 문자와 읽기 순서를 보존한다. 화면 ID가 텍스트 추출에서 빠지면 OCR 또는 검토 보완을 수행하고 방법을 표시한다. reference의 manual_transcription은 시각 확인한 예시 전사이며 OCR 실행 완료를 뜻하지 않는다. 원문과 정규화 텍스트를 분리하고 quote는 저장한 원문 블록과 정확히 일치하게 한다.
 
-이후 LLM은 블록을 입력받아 의미 구조만 반환한다. 기존 block_id 외의 출처를 생성하거나 페이지 번호를 추측하지 않는다.
+LLM은 `topics[].subtopics[]`를 정의하고 요구사항의 subtopic_key로 연결한다. `source_markers`는 원문 Description/Action 번호이고 stable_key는 내부 후보 키다. 화면·팝업·오류 상태는 원문 화면 ID와 base_screen_key로 연결하며 원문에 없는 ID를 원문 번호처럼 만들지 않는다. 숫자 규칙은 constraint에 단위·연산자까지 보존한다. PDF의 **50MB 이하**는 le/50/MB이며 MB 바이트 정의만 확인 대상으로 남긴다.
 
-```json
-{
-  "contract_version": "2.1",
-  "document_id": "doc-001",
-  "document_revision": 1,
-  "topics": [
-    {
-      "key": "NOTICE",
-      "title": "공지사항",
-      "title_origin": "extracted",
-      "source_refs": [
-        {
-          "block_id": "block-004-topic",
-          "quote": "공지사항"
-        }
-      ],
-      "review_reasons": [],
-      "subtopics": [
-        {
-          "key": "NOTICE-CREATE",
-          "title": "공지사항 작성",
-          "title_origin": "extracted",
-          "source_refs": [
-            {
-              "block_id": "block-004-subtopic",
-              "quote": "공지사항 작성"
-            }
-          ],
-          "review_reasons": [],
-          "screen_keys": [
-            "NOTICE-002"
-          ]
-        }
-      ]
-    }
-  ],
-  "screens": [
-    {
-      "screen_key": "NOTICE-002",
-      "title": "공지사항 작성 화면",
-      "source_block_ids": [
-        "block-004-subtopic",
-        "block-004-01",
-        "block-004-02"
-      ]
-    }
-  ],
-  "requirements": [
-    {
-      "stable_key": "NOTICE-002-1",
-      "subtopic_key": "NOTICE-CREATE",
-      "screen_key": "NOTICE-002",
-      "title": "첨부 파일 크기 제한",
-      "original_text": "첨부 파일은 최대 300MB까지 등록할 수 있다.",
-      "condition": "첨부 파일을 등록하는 경우",
-      "action": "파일 등록",
-      "expected": "명세에 정한 최대 크기 범위의 파일 등록 허용",
-      "req_type": "functional",
-      "origin": "extracted",
-      "source_refs": [
-        {
-          "block_id": "block-004-01",
-          "quote": "첨부 파일은 최대 300MB까지 등록할 수 있다."
-        }
-      ],
-      "conditions": [
-        {
-          "stable_key": "NOTICE-002-1-C1",
-          "text": "첨부 파일 크기 제한은 최대 300MB이다.",
-          "category": "validation",
-          "target": "unknown",
-          "verifiable": "code",
-          "source_refs": [
-            {
-              "block_id": "block-004-01",
-              "quote": "최대 300MB"
-            }
-          ],
-          "ambiguity": "MB 단위 정의와 경계 포함 방식은 원문에 상세히 정의되지 않음",
-          "related_condition_keys": []
-        }
-      ],
-      "review_reasons": [
-        "파일 크기 단위 해석 확인 필요"
-      ]
-    },
-    {
-      "stable_key": "NOTICE-002-2",
-      "subtopic_key": "NOTICE-CREATE",
-      "screen_key": "NOTICE-002",
-      "title": "제목 필수 입력",
-      "original_text": "제목은 필수 입력이다.",
-      "condition": "공지를 작성하는 경우",
-      "action": "제목 입력",
-      "expected": "제목을 필수로 입력해야 한다.",
-      "req_type": "functional",
-      "origin": "extracted",
-      "source_refs": [
-        {
-          "block_id": "block-004-02",
-          "quote": "제목은 필수 입력이다."
-        }
-      ],
-      "conditions": [
-        {
-          "stable_key": "NOTICE-002-2-C1",
-          "text": "공지사항 작성 시 제목 입력은 필수이다.",
-          "category": "validation",
-          "target": "unknown",
-          "verifiable": "code",
-          "source_refs": [
-            {
-              "block_id": "block-004-02",
-              "quote": "제목은 필수 입력이다."
-            }
-          ],
-          "ambiguity": "미입력 시 표시 문구·처리 방식은 원문에 없음",
-          "related_condition_keys": []
-        }
-      ],
-      "review_reasons": [
-        "제목 미입력 시 처리 방식 확인 필요"
-      ]
-    }
-  ],
-  "warnings": []
-}
-```
-
-**요구사항 추출 초안의 계약은 2.1**이며, 주제·소주제와 출처·모호성 규칙은 [출력 계약](PARSER_OUTPUT_SPEC.md)을 따른다. `topics[].subtopics[]`에 이름을 한 번 정의하고 `requirements[].subtopic_key`로 연결한다. 화면은 별도 관계다.
-
-서버는 초안을 검증한 뒤 topic_id·subtopic_id·screen_id·requirement_id·condition_id를 발급하고 related_condition_keys를 related_condition_ids로 바꾼다. 원문의 표시 번호는 별도 메타데이터로 보존한다. stable_key는 최초 후보 키이며 문서 개정 간 승계는 서버가 확인한다. 모델은 review_status=approved를 설정하지 않는다.
+서버는 출처·후보 키·관계를 검증한 뒤 topic_id·subtopic_id·screen_id·requirement_id·condition_id를 발급한다. 원문 표시 번호와 개정 간 stable_key 승계는 별도로 관리한다. 검토 상태를 모델이 approved로 설정하지 않는다. 자세한 필드·실패·검토 규칙은 [팀원 1 출력 계약](PARSER_OUTPUT_SPEC.md)을 따른다.
 
 ### 2.3 팀원 1 완료 조건·평가
 
@@ -282,31 +99,74 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
 
 ```json
 {
-  "contract_version": "2.1",
+  "contract_version": "2.2",
   "project_id": "project-001",
   "snapshot_id": "snap-001",
   "model_config_version": 2,
   "requirements": [
     {
-      "id": "req-001",
+      "id": "req-attachment",
       "revision": 3,
       "review_status": "approved",
       "screen_id": "screen-001",
       "title": "첨부 파일 크기 제한",
       "source_refs": [
         {
-          "block_id": "block-004-01",
-          "quote": "최대 300MB"
+          "block_id": "p09-description-7",
+          "quote": "첨부파일은50MB이하의 파일만 업로드 가능하며"
         }
       ],
       "conditions": [
         {
-          "id": "cond-001",
-          "text": "첨부 파일 크기 제한은 최대 300MB이다.",
+          "id": "cond-size",
+          "text": "첨부 파일은 50MB 이하만 허용한다.",
           "category": "validation",
           "target": "unknown",
           "verifiable": "code",
-          "ambiguity": "MB 단위 정의는 원문에 상세히 정의되지 않음"
+          "ambiguity": "MB 단위 정의는 원문에 상세히 정의되지 않음",
+          "constraint": {
+            "field": "notice.attachment.size",
+            "operator": "le",
+            "value": 50,
+            "unit": "MB",
+            "unit_definition": null
+          },
+          "source_refs": [
+            {
+              "block_id": "p09-description-7",
+              "quote": "첨부파일은50MB이하의 파일만 업로드 가능하며"
+            }
+          ]
+        },
+        {
+          "id": "cond-name",
+          "text": "업로드한 첨부 파일명을 입력창 안에 표시한다.",
+          "category": "business_logic",
+          "target": "frontend",
+          "verifiable": "code",
+          "ambiguity": "",
+          "constraint": null,
+          "source_refs": [
+            {
+              "block_id": "p09-description-7",
+              "quote": "공지사항에포함되는첨부파일이저장되며, 첨부파일은하나만 업로드 가능하다. 첨부파일을업로드하게되면입력창 안에첨부\n파일의 이름이 넣어지며넣은첨부파일은창안에 x버튼으로삭제할 수있다.\n(1) 첨부파일은50MB이하의 파일만 업로드 가능하며, 50MB초과일 시, 다음과 같이에러메시지가표시된다.\n* error-msg: 첨부파일의크기는 50MB이하만 가능합니다."
+            }
+          ]
+        },
+        {
+          "id": "cond-remove",
+          "text": "첨부 입력창 안의 x 버튼으로 첨부 파일을 삭제할 수 있다.",
+          "category": "business_logic",
+          "target": "frontend",
+          "verifiable": "code",
+          "ambiguity": "",
+          "constraint": null,
+          "source_refs": [
+            {
+              "block_id": "p09-description-7",
+              "quote": "공지사항에포함되는첨부파일이저장되며, 첨부파일은하나만 업로드 가능하다. 첨부파일을업로드하게되면입력창 안에첨부\n파일의 이름이 넣어지며넣은첨부파일은창안에 x버튼으로삭제할 수있다.\n(1) 첨부파일은50MB이하의 파일만 업로드 가능하며, 50MB초과일 시, 다음과 같이에러메시지가표시된다.\n* error-msg: 첨부파일의크기는 50MB이하만 가능합니다."
+            }
+          ]
         }
       ],
       "subtopic_id": "subtopic-001"
@@ -319,7 +179,7 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
       "file_path": "src/NoticeService.java",
       "start_line": 34,
       "end_line": 34,
-      "content": "if (file.getSize() > 50L * 1024 * 1024) {",
+      "content": "if (file.getSize() > 10L * 1024 * 1024) {",
       "scope": "this_screen"
     }
   ],
@@ -359,13 +219,13 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
 {
   "contract_version": "2.0",
   "snapshot_id": "snap-001",
-  "requirement_id": "req-001",
+  "requirement_id": "req-attachment",
   "requirement_revision": 3,
   "condition_verdicts": [
     {
-      "condition_id": "cond-001",
+      "condition_id": "cond-size",
       "status": "mismatch",
-      "reason": "명세는 최대 300MB를 요구하지만 코드 검사 상한은 50MB입니다. 단위 정의의 모호성과 별개로 값 차이가 있습니다.",
+      "reason": "명세는 최대 50MB를 요구하지만 코드 검사 상한은 10MB입니다. 단위 정의의 모호성과 별개로 값 차이가 있습니다.",
       "primary_chunk_ids": ["chunk-010"],
       "reference_chunk_ids": [],
       "message_match": "not_applicable",
@@ -377,7 +237,7 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
     {
       "key": "attachment-limit",
       "title": "첨부 크기 제한 불일치",
-      "condition_ids": ["cond-001"],
+      "condition_ids": ["cond-size"],
       "problem_chunk_ids": ["chunk-010"],
       "context_chunk_ids": [],
       "problem_node_ids": [],
@@ -403,7 +263,7 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
 
 ### 3.4 테스트 생성 출력 계약
 
-판정 결과만 보고 시험을 만드는 것이 아니라 검토된 **명세를 기대 결과의 기준**으로 사용한다. 코드가 50MB를 허용한다고 해서 기대 결과를 50MB로 바꾸면 안 된다.
+판정 결과만 보고 시험을 만드는 것이 아니라 검토된 **명세를 기대 결과의 기준**으로 사용한다. 코드가 10MB를 허용한다고 해서 기대 결과를 50MB로 바꾸면 안 된다.
 
 ```json
 {
@@ -411,18 +271,18 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
   "verification_run_id": "run-001",
   "test_candidates": [
     {
-      "requirement_id": "req-001",
+      "requirement_id": "req-attachment",
       "requirement_revision": 3,
-      "condition_ids": ["cond-001"],
+      "condition_ids": ["cond-size"],
       "title": "허용 범위 파일 등록 확인",
       "type": "positive",
       "preconditions": "등록 권한 계정과 크기가 확인된 테스트 파일 준비",
-      "input_data": "명세 허용 범위 안의 100MB 파일",
-      "steps": ["파일 등록 화면을 연다.", "100MB 파일을 선택하고 저장한다."],
+      "input_data": "명세 허용 범위 안의 25MB 파일",
+      "steps": ["파일 등록 화면을 연다.", "25MB 파일을 선택하고 저장한다."],
       "expected": "파일이 정상 등록된다.",
       "prediction": {
         "status": "failure_expected",
-        "reason": "선택한 코드 근거에는 50MB 상한 검사가 있습니다.",
+        "reason": "선택한 코드 근거에는 10MB 상한 검사가 있습니다.",
         "verification_run_id": "run-001",
         "primary_chunk_ids": ["chunk-010"]
       },
@@ -434,7 +294,7 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
 }
 ```
 
-100MB는 원문의 300MB 범위 안에서 생성한 시험 입력이며 추출한 업무 규칙이 아니다. 경계 시험은 단위·포함 여부가 확정된 뒤 만든다. 입력 데이터와 문서에서 추출한 규칙을 구분한다.
+25MB는 원문의 50MB 범위 안에서 생성한 시험 입력이며 추출한 업무 규칙이 아니다. 경계 시험은 단위·포함 여부가 확정된 뒤 만든다. 입력 데이터와 문서에서 추출한 규칙을 구분한다.
 
 서버는 실제 TestCase ID와 origin=generated를 부여하고 prediction의 청크를 evidence ID로 연결한다. **actual·performed_at·passed/failed는 모델 출력에 포함하지 않는다.** 실제 수행은 별도 API·별도 회차다.
 
@@ -463,7 +323,7 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
 
 모델 호출 공통 인터페이스는 provider/model/profile/config_version을 백엔드에서 전달하고, 단계별 프롬프트와 출력 스키마만 달리한다. 키는 작업 인자·출력 JSON에 넣지 않고 실행 시 어댑터가 비밀 참조로 해결한다. 제한된 재시도·타임아웃·사용량은 공통 모듈에서 관리한다.
 
-표의 절차·입력·기대 결과를 사용자가 수정하면 이전 시험 예측은 새 revision에 그대로 적용하지 않는다. 팀원 2는 예측 갱신에 필요한 입력 계약을 제공하고, 백엔드는 기존 예측·수행 결과를 보존한다. 저장·취소 동작 자체는 모델을 호출하지 않는다. 내부 계약 버전: DocumentArtifact·판정·시험 생성은 2.0 유지, 주제·소주제가 추가된 요구사항 추출과 팀원 2 인계는 2.1. 문서 2.2가 모든 내부 출력의 버전 변경을 뜻하지 않는다.
+표의 절차·입력·기대 결과를 사용자가 수정하면 이전 시험 예측은 새 revision에 그대로 적용하지 않는다. 팀원 2는 예측 갱신에 필요한 입력 계약을 제공하고, 백엔드는 기존 예측·수행 결과를 보존한다. 저장·취소 동작 자체는 모델을 호출하지 않는다. 내부 계약 버전: DocumentArtifact 2.1, 요구사항 추출·팀원 2 인계 2.2, 코드 판정·시험 생성은 2.0 유지. 단계별 시험 출력 계약은 별도 후속 변경이다.
 
 ## 5. 권장 개발 순서와 전달물
 
