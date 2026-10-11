@@ -37,6 +37,32 @@ def test_requirement_review_and_revision_preserved(client, v2_project, v2_requir
     assert client.patch(url, json={'base_revision': 3, 'original_text': '원문변경'}).status_code == 422
 
 
+def test_related_historical_condition_survives_owner_edit(client, v2_project, v2_document, v2_requirement):
+    base = f'/api/v2/projects/{v2_project}/requirements'
+    old_condition = v2_requirement['conditions'][0]['id']
+    body = {'document_id': v2_document, 'document_revision': 1, 'title': '관련 오류 표시', 'author_reason': '검토 추가',
+            'conditions': [{'stable_key':'related-error', 'text':'제목 제한 오류 표시', 'category':'error_message',
+                            'target':'frontend', 'verifiable':'code', 'related_condition_ids':[old_condition]}]}
+    related = client.post(base, json=body)
+    assert related.status_code == 201, related.text
+    changed = client.patch(base + '/' + v2_requirement['id'], json={'base_revision':1, 'title':'수정된 제목 제한'})
+    assert changed.status_code == 200 and changed.json()['conditions'][0]['id'] != old_condition
+    approved = client.put(base + '/' + related.json()['id'] + '/review', json={'base_revision':1,'status':'approved'})
+    assert approved.status_code == 200, approved.text
+    assert approved.json()['conditions'][0]['related_condition_ids'] == [old_condition]
+    assert client.get(base + '/' + v2_requirement['id'] + '?revision=1').json()['conditions'][0]['id'] == old_condition
+
+
+def test_stale_condition_edit_returns_version_conflict_first(client, v2_project, v2_requirement):
+    url = f'/api/v2/projects/{v2_project}/requirements/{v2_requirement["id"]}'
+    approved = client.put(url + '/review', json={'base_revision':1,'status':'approved'})
+    assert approved.status_code == 200
+    result = client.patch(url, json={'base_revision':1, 'conditions':v2_requirement['conditions']})
+    assert result.status_code == 409
+    assert result.json()['error']['code'] == 'VERSION_CONFLICT'
+    assert result.json()['error']['details']['current_revision'] == 2
+
+
 def test_scope_and_bad_source_are_rejected(client, v2_project, v2_document, v2_requirement):
     other = client.post('/api/v2/projects', json={'name': '다른 프로젝트'}).json()['id']
     assert client.get(f'/api/v2/projects/{other}/documents/{v2_document}').status_code == 404
