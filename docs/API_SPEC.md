@@ -199,7 +199,7 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
   "requirement_id": "req-001",
   "requirement_revision": 3,
   "status": "mismatch",
-  "reason": "명세는 50MB인데 분석 범위의 검사 값은 50MB입니다.",
+  "reason": "명세는 50MB인데 분석 범위의 검사 값은 10MB입니다.",
   "condition_verdicts": [
     {
       "condition_id": "cond-001",
@@ -227,7 +227,7 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
       "file_path": "src/NoticeService.java",
       "start_line": 34,
       "end_line": 34,
-      "code_snippet": "if (file.getSize() > 50L * 1024 * 1024) {",
+      "code_snippet": "if (file.getSize() > 10L * 1024 * 1024) {",
       "role": "problem",
       "scope": "this_screen",
       "condition_ids": ["cond-001"],

@@ -77,3 +77,28 @@ def v2_requirement(client, v2_project, v2_document):
     r = client.post(f'/api/v2/projects/{v2_project}/requirements', json=body)
     assert r.status_code == 201, r.text
     return r.json()
+
+
+@pytest.fixture
+def v2_snapshot(client, v2_project):
+    from io import BytesIO
+    from zipfile import ZipFile
+    content = BytesIO()
+    with ZipFile(content, 'w') as z:
+        z.writestr('src/notice.js', 'export function valid(title) { return title.length <= 10; }\n')
+        z.writestr('application.yml', 'title-limit: 10\n')
+    source = client.post(f'/api/v2/projects/{v2_project}/code/sources', files={'file': ('source.zip', content.getvalue())}).json()
+    job = client.post(f'/api/v2/projects/{v2_project}/code/index', json={'source_id': source['source_id']})
+    assert job.status_code == 202, job.text
+    assert job.json()['status'] == 'completed'
+    return job.json()['result_ref']['id']
+
+
+@pytest.fixture
+def v2_run(client, v2_project, v2_requirement, v2_snapshot):
+    approved = client.put(f'/api/v2/projects/{v2_project}/requirements/{v2_requirement["id"]}/review', json={'base_revision': 1, 'status': 'approved'}).json()
+    job = client.post(f'/api/v2/projects/{v2_project}/verification-runs', json={'snapshot_id': v2_snapshot,
+        'requirement_versions': [{'requirement_id': approved['id'], 'revision': approved['revision']}], 'model_config_version': 0})
+    assert job.status_code == 202, job.text
+    run = client.get(f'/api/v2/projects/{v2_project}/verification-runs').json()['items'][-1]
+    return run

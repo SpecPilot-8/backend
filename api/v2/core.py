@@ -45,10 +45,10 @@ def project_out(value):
 
 @router.get('/capabilities')
 def capabilities(config: Config):
-    return {'api_version': '2', 'formats': [{'format': 'pdf', 'status': 'partial', 'limitations': ['ocr', 'layout_semantics']}], 'stacks': [],
+    return {'api_version': '2', 'formats': [{'format': 'pdf', 'status': 'partial', 'limitations': ['ocr', 'layout_semantics']}], 'stacks': [{'name': 'Java/JavaScript/HTML', 'status': 'partial', 'limitations': ['call_flow', 'screen_reachability']}, {'name': 'TypeScript', 'status': 'partial', 'limitations': ['text_only']}],
             'limits': {'upload_bytes': config.max_upload_bytes, 'source_bytes': config.max_source_bytes,
                        'source_files': config.max_source_files, 'source_file_bytes': config.max_source_file_bytes},
-            'features': [{'code': 'projects', 'status': 'ready'}, {'code': 'jobs', 'status': 'ready'}, {'code': 'documents', 'status': 'partial'}, {'code': 'requirement_management', 'status': 'ready'}, {'code': 'requirement_extraction', 'status': 'not_implemented'}],
+            'features': [{'code': 'projects', 'status': 'ready'}, {'code': 'jobs', 'status': 'ready'}, {'code': 'documents', 'status': 'partial'}, {'code': 'requirement_management', 'status': 'ready'}, {'code': 'requirement_extraction', 'status': 'not_implemented'}, {'code': 'code_snapshots', 'status': 'ready'}, {'code': 'verification_queries', 'status': 'ready'}, {'code': 'implementation_judgment', 'status': 'not_implemented'}, {'code': 'call_flow', 'status': 'not_implemented'}],
             'missing_features': missing('model_adapters', '팀원 모델 어댑터가 연결되지 않았습니다')}
 
 
