@@ -508,6 +508,8 @@ SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/
 
 출력 작업은 접수 시 선택 실행·사양서 revision·각 시험별 수행 회차 ID를 고정한다. 빈 결과는 409 EMPTY_EXPORT. 다운로드 Content-Type은 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, Content-Disposition은 attachment 및 안전한 filename이다. 권한 검사·프로젝트 소유 검사 후 다운로드한다. artifact의 실제 보관·만료 정책은 운영 구성에서 별도로 정한다.
 
+현재 v2 출력은 요청 안에서 XLSX를 생성하고 저장한 뒤 completed 작업을 반환한다. 별도 큐 작업으로 전환하는 것은 후속 개발이다. 다운로드는 저장한 파일을 그대로 반환하며 이후 절차/수행 수정으로 바뀌지 않는다. 프로젝트 범위 검사는 구현되어 있으며 사용자 인증·권한 검사는 운영 연동 과제다. 시트당 데이터 행 기본 한도는 10,000이고 capabilities에서 조회한다. Excel 셀 32,767자 초과는 표시 생략 안내와 저장된 artifact 경고를 남긴다. 수식 형태의 입력도 문자열로 출력하며 원문 전체는 API 데이터에 보존한다. 기능별 시행일은 해당 시트의 실제 수행 시각에서만 가져온다.
+
 ## 9. 오류 계약과 연동 조건
 
 ```json
