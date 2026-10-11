@@ -1,6 +1,6 @@
 # SpecPilot API 명세서
 
-버전: 목표 계약 2.4 · 갱신일: 2026-10-10
+버전: v2 계약 2.5 · 갱신일: 2026-10-11
 
 관련 문서: [기능명세](FUNCTIONAL_SPEC.md), [모델 담당·내부 입출력](MODEL_TEAM_GUIDE.md).
 
@@ -20,7 +20,7 @@
 
 ## 2. 현재 API와 기능 브랜치
 
-### 2.1 현재 체크아웃에서 연결된 API
+### 2.1 이전 v1 체크아웃에서 확인한 API (과거 기록)
 
 기준: `docs/functional-specification`, 커밋 `b3d1a76`, `api/routes.py`. 여기는 실제 `/api/v1` 경로다.
 
@@ -41,7 +41,7 @@ JobOut: `id,project_id,operation,status,snapshot_id,model_config_snapshot,missin
 
 `name` 1..200자, `workspace_path` 1..4096자이며 서버 허용 루트 안의 경로만 사용한다. 현재 작업 조회는 실제 AI 워커 실행 완료를 의미하지 않는다.
 
-### 2.2 앞서 작성한 기능 API 기반
+### 2.2 앞서 작성한 v1 기능 API 기반 (과거 기록)
 
 로컬 누적 브랜치 `feat/llm-settings-api`의 `api/routes.py`에서 다음 라우트 정의를 확인했다. **현재 체크아웃에 모두 연결된 것은 아니며 이번 문서 작업에서 실행 검증·병합하지 않았다.**
 
@@ -59,6 +59,8 @@ JobOut: `id,project_id,operation,status,snapshot_id,model_config_snapshot,missin
 이 표의 경로 앞에는 `/api/v1`이 붙는다. AI 관련 접수는 blocked 상태 저장 또는 미구현 사유 응답 기반이며, AI 처리까지 완료되었다는 뜻이 아니다. 기존 `/api/spec/parse`, `/api/code/verify`, `/api/test-spec/export`는 호환 경로이며 v2에서는 추가하지 않는다.
 
 ## 3. 공통 상태·데이터
+
+2026-10-11의 누적 v2 브랜치는 4~8절의 HTTP 경로를 등록한다. 실제 모델 처리는 미연결이며 해당 요청은 blocked/501로 사유를 반환한다. 실제 가능한 작업·추가 개발·PR 의존 순서는 [구현·연동 상태](IMPLEMENTATION_STATUS.md)를 확인한다. 현재 OpenAPI(`/openapi.json`)가 요청 필드·필수 값·enum의 실행 기준이며 본 문서의 완료 응답 예시는 모델 연결 후 목표와 구분한다.
 
 ### 3.1 상태를 섞지 않는다
 
@@ -108,7 +110,7 @@ SourceRef = `{block_id,quote}`. **소스 위치는 서버가 SourceBlock을 조�
 
 source_screen_id는 원문 화면 번호이며 시험번호(test_no)와 서버 DB ID를 구분한다. 예: PDF의 LOGIN-002는 회원가입 화면이고 Excel의 LOGIN-002는 로그인 오류 시험번호이므로 이름이 같다고 연결하지 않는다. 원문 번호는 표시·추적용이며 DB ID로 사용하지 않는다.
 
-## 4. 프로젝트·지원 기능·모델 API (개발 목표)
+## 4. 프로젝트·지원 기능·모델 API (v2 계약)
 
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
@@ -129,7 +131,7 @@ ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabiliti
 
 키 저장 API는 비밀 저장소를 구현한 뒤 활성화한다. 암호화된 저장과 별도 참조로 관리하며 원문 키를 조회할 API는 없다. 이 API의 재시도는 키를 로그에 출력하지 않는다. 로컬 모델 등 키가 필요 없는 프로필은 credential_ref가 null이다. 연결 확인은 제한된 실제 어댑터 호출로 검증하며, 연결 성공이 모델 정확도 검증은 아니다.
 
-## 5. 문서·명세 분석 API (개발 목표)
+## 5. 문서·명세 분석 API (v2 계약)
 
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
@@ -157,7 +159,7 @@ ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabiliti
 
 조건 ID는 요구사항 revision에 속한다. related_condition_ids는 같은 프로젝트·문서 개정의 과거 조건도 참조할 수 있으며 소유 요구사항이 수정되어도 기존 참조를 보존한다. 본인 개정의 조건끼리 연결한 ID는 새 개정 ID로 치환한다. 오래된 base_revision은 조건 내용 처리에 앞서 409 VERSION_CONFLICT로 알리고 저장 시에도 조건부 갱신으로 검사한다. GET 출처의 location은 서버가 조인한 읽기 전용 값이며 쓰기 요청의 source_refs에는 block_id·quote만 제출한다.
 
-## 6. 코드·검증 API (개발 목표)
+## 6. 코드·검증 API (v2 계약)
 
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
@@ -258,7 +260,7 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
 - 수정 제안은 partial/mismatch일 때만 허용하고, 적용 API는 제공하지 않는다.
 - 분석 불충분 시 needs_review와 warnings를 사용한다. 빈 근거의 not_found는 분석 범위에서 못 찾았다는 의미다.
 
-## 7. 테스트 사양서·절차·실제 수행 API (개발 목표)
+## 7. 테스트 사양서·절차·실제 수행 API (v2 계약)
 
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
@@ -473,7 +475,7 @@ execution-summary는 revision(생략 시 최신), requirement_id, execution_sele
 
 2026-10-11 v2 표 저장 구현은 [구현 상태](IMPLEMENTATION_STATUS.md)를 따른다. 이전 Figma 프로토타입은 예시 시나리오 수준 편집·변수 갱신이며, 서버 DB 저장과 별도이며 프런트 연결이 필요하다.
 
-## 8. 작업·산출물 API (개발 목표)
+## 8. 작업·산출물 API (v2 계약)
 
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
