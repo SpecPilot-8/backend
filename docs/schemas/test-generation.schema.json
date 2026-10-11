@@ -1,0 +1,268 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "const": "2.1"
+    },
+    "verification_run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "test_candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TestCandidate"
+      },
+      "minItems": 0
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Warning"
+      },
+      "minItems": 0
+    }
+  },
+  "required": [
+    "contract_version",
+    "verification_run_id",
+    "test_candidates",
+    "warnings"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SpecPilot 단계별 시험 생성 2.1",
+  "$defs": {
+    "TestData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "account",
+        "input",
+        "notes"
+      ]
+    },
+    "RequirementLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirement_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "condition_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        }
+      },
+      "required": [
+        "requirement_id",
+        "requirement_revision",
+        "condition_ids"
+      ]
+    },
+    "TestStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "step_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "string",
+          "minLength": 1
+        },
+        "test_data": {
+          "$ref": "#/$defs/TestData"
+        },
+        "requirement_links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementLink"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "step_key",
+        "order",
+        "action",
+        "expected",
+        "test_data",
+        "requirement_links"
+      ]
+    },
+    "Prediction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "normal_expected",
+            "failure_expected",
+            "needs_review",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "verification_run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "primary_chunk_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "verification_run_id",
+        "primary_chunk_ids"
+      ]
+    },
+    "TestCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "candidate_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "export_section_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subtopic_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "positive",
+            "negative",
+            "boundary"
+          ]
+        },
+        "preconditions": {
+          "type": "string"
+        },
+        "requirement_links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementLink"
+          },
+          "minItems": 1
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TestStep"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "prediction": {
+          "$ref": "#/$defs/Prediction"
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Warning"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "candidate_key",
+        "export_section_key",
+        "subtopic_id",
+        "title",
+        "type",
+        "preconditions",
+        "requirement_links",
+        "steps",
+        "prediction",
+        "assumptions",
+        "warnings"
+      ]
+    },
+    "Warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "block_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "block_ids"
+      ]
+    }
+  }
+}

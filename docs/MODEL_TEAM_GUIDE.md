@@ -1,6 +1,6 @@
 # SpecPilot 모델 개발 분담 및 요구 기능 명세
 
-문서 버전: 2.3 · 갱신일: 2026-10-10
+문서 버전: 2.4 · 갱신일: 2026-10-10
 
 함께 읽을 문서: [기능명세](FUNCTIONAL_SPEC.md), [API 명세](API_SPEC.md), [팀원 1 출력 계약·전달용 안내](PARSER_OUTPUT_SPEC.md).
 
@@ -263,40 +263,13 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
 
 ### 3.4 테스트 생성 출력 계약
 
-판정 결과만 보고 시험을 만드는 것이 아니라 검토된 **명세를 기대 결과의 기준**으로 사용한다. 코드가 10MB를 허용한다고 해서 기대 결과를 50MB로 바꾸면 안 된다.
+시험 생성은 **2.1**로 갱신한다. [전달용 테스트 출력 계약](TEST_OUTPUT_SPEC.md), [JSON Schema](schemas/test-generation.schema.json), [모델 출력 예시](examples/test-generation.json)를 따른다.
 
-```json
-{
-  "contract_version": "2.0",
-  "verification_run_id": "run-001",
-  "test_candidates": [
-    {
-      "requirement_id": "req-attachment",
-      "requirement_revision": 3,
-      "condition_ids": ["cond-size"],
-      "title": "허용 범위 파일 등록 확인",
-      "type": "positive",
-      "preconditions": "등록 권한 계정과 크기가 확인된 테스트 파일 준비",
-      "input_data": "명세 허용 범위 안의 25MB 파일",
-      "steps": ["파일 등록 화면을 연다.", "25MB 파일을 선택하고 저장한다."],
-      "expected": "파일이 정상 등록된다.",
-      "prediction": {
-        "status": "failure_expected",
-        "reason": "선택한 코드 근거에는 10MB 상한 검사가 있습니다.",
-        "verification_run_id": "run-001",
-        "primary_chunk_ids": ["chunk-010"]
-      },
-      "assumptions": ["시험 계정·파일은 사용자가 준비해야 합니다."],
-      "warnings": []
-    }
-  ],
-  "warnings": []
-}
-```
+시험 하나는 시험번호 하나의 시나리오다. `steps[]`는 문자열 배열이 아니라 step_key·order·action·expected·test_data(계정·입력값·비고)·requirement_links를 가진 객체 배열이다. 각 단계에서 여러 요구사항 revision·수락조건을 참조할 수 있다. 전체 requirement_links는 단계 참조의 중복 없는 합집합이다.
 
-25MB는 원문의 50MB 범위 안에서 생성한 시험 입력이며 추출한 업무 규칙이 아니다. 경계 시험은 단위·포함 여부가 확정된 뒤 만든다. 입력 데이터와 문서에서 추출한 규칙을 구분한다.
+Excel 한 행은 단계 한 개다. 예상결과는 단계별 expected(명세 기준)이며 prediction(코드 기반 예측)·확인결과(사람 수행)와 분리한다. 모델은 실제 결과·수행 날짜·PASS/FAIL/O/X를 생성하지 않는다. 서버가 사양서와 시험번호·시험 ID를 부여하고, 사람이 수행한 결과는 별도 회차의 step_results에 기록한다.
 
-서버는 실제 TestCase ID와 origin=generated를 부여하고 prediction의 청크를 evidence ID로 연결한다. **actual·performed_at·passed/failed는 모델 출력에 포함하지 않는다.** 실제 수행은 별도 API·별도 회차다.
+25MB 입력은 PDF의 50MB 이하 규칙 안에서 만든 시험 데이터다. 설명용 코드가 10MB를 허용한다고 기대 결과를 10MB로 바꾸지 않는다. 단위가 확인되지 않은 정확한 경계 시험은 검토 확정 뒤 만든다. Excel 예시의 시드 데이터 개수·계정·권한·URL을 PDF의 확정 요구사항에 섞지 않는다. 소스가 충돌하면 검토 경고를 반환한다.
 
 ### 3.5 팀원 2 완료 조건·평가
 
@@ -323,7 +296,7 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
 
 모델 호출 공통 인터페이스는 provider/model/profile/config_version을 백엔드에서 전달하고, 단계별 프롬프트와 출력 스키마만 달리한다. 키는 작업 인자·출력 JSON에 넣지 않고 실행 시 어댑터가 비밀 참조로 해결한다. 제한된 재시도·타임아웃·사용량은 공통 모듈에서 관리한다.
 
-표의 절차·입력·기대 결과를 사용자가 수정하면 이전 시험 예측은 새 revision에 그대로 적용하지 않는다. 팀원 2는 예측 갱신에 필요한 입력 계약을 제공하고, 백엔드는 기존 예측·수행 결과를 보존한다. 저장·취소 동작 자체는 모델을 호출하지 않는다. 내부 계약 버전: DocumentArtifact 2.1, 요구사항 추출·팀원 2 인계 2.2, 코드 판정·시험 생성은 2.0 유지. 단계별 시험 출력 계약은 별도 후속 변경이다.
+표의 절차·입력·기대 결과를 사용자가 수정하면 이전 시험 예측은 새 revision에 그대로 적용하지 않는다. 팀원 2는 예측 갱신에 필요한 입력 계약을 제공하고, 백엔드는 기존 예측·수행 결과를 보존한다. 저장·취소 동작 자체는 모델을 호출하지 않는다. 내부 계약 버전: DocumentArtifact 2.1, 요구사항 추출·팀원 2 인계 2.2, 단계별 시험 생성 2.1, 코드 판정은 2.0 유지. 문서 버전 2.4와 내부 계약 버전을 구분한다.
 
 ## 5. 권장 개발 순서와 전달물
 

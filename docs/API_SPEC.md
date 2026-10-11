@@ -1,6 +1,6 @@
 # SpecPilot API 명세서
 
-버전: 목표 계약 2.3 · 갱신일: 2026-10-10
+버전: 목표 계약 2.4 · 갱신일: 2026-10-10
 
 관련 문서: [기능명세](FUNCTIONAL_SPEC.md), [모델 담당·내부 입출력](MODEL_TEAM_GUIDE.md).
 
@@ -97,8 +97,10 @@ UI 한국어 라벨은 기능명세를 따른다. 계약 데이터와 출력물�
 | Chunk | id, snapshot_id, relative file_path, start_line, end_line, symbol, content |
 | VerificationRun | id, snapshot_id, requirement_versions[], model_config_snapshot, prompt_version, rules_version, status |
 | Verification | requirement_id, requirement_revision, run_id, status(nullable), condition_verdicts[], findings[], evidence[], call_flow |
-| TestCase | id, requirement_id, requirement_revision, condition_ids[], revision, type, title, preconditions, input_data, steps[], expected, origin, prediction |
-| TestExecution | id, test_case_id, test_case_revision, version, attempt_no, status, actual, notes, environment, tested_build, performed_at, updated_at |
+| TestCase | id, test_no, export_section_key, subtopic_id, requirement_links[], revision, type, title, preconditions, steps:[TestStep], origin, prediction |
+| TestStep | step_key, order, action, expected, test_data(account/input/notes), requirement_links[] |
+| TestExecution | id, test_case_id, test_case_revision, version, attempt_no, status(서버 집계), step_results[], environment, tested_build, updated_at |
+| StepResult | step_key, status, actual, notes, performed_at(nullable) |
 
 SourceRef = `{block_id,quote}`. **소스 위치는 서버가 SourceBlock을 조인해 채운다.** `location`은 `{kind:"page",index:4,bbox:[x,y,w,h]}` 또는 sheet/slide/section 형태다. index는 1부터 시작하며 bbox는 선택 사항이다. 텍스트 오프셋을 쓰는 경우 단위는 Unicode 코드 포인트, 시작 포함·끝 제외다.
 
@@ -271,59 +273,118 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
 | POST | `/projects/{p}/test-specifications/{t}/edit-batches` | 7.3의 표 편집 저장 → 200 배치 결과; 기본 UI의 저장 버튼용 |
 | GET | `/projects/{p}/test-specifications/{t}/execution-summary` | 아래 선택 정책 → 상태별 수 |
 
-### 7.1 절차 생성·편집
+### 7.1 시나리오·단계 생성과 편집
+
+TestCase는 시험번호 하나의 시나리오이며 Excel 한 행은 그 안의 TestStep이다. [단계별 시험·Excel 계약](TEST_OUTPUT_SPEC.md)을 따른다. 수동 생성 요청 예:
 
 ```json
 {
-  "test_specification_id": "spec-001",
-  "requirement_id": "req-001",
-  "requirement_revision": 3,
-  "condition_ids": ["cond-001"],
-  "title": "첨부 파일 최대 허용 크기 확인",
-  "type": "boundary",
-  "preconditions": "첨부 가능한 사용자 계정과 테스트 파일 준비",
-  "input_data": "문서 정의에 맞춘 50MB 파일",
-  "steps": ["파일 등록 화면을 연다.", "파일을 선택하고 저장한다."],
-  "expected": "명세에 정한 허용 범위의 파일이 등록된다."
+  "export_section_key": "notice",
+  "subtopic_id": "subtopic-001",
+  "title": "허용 크기 첨부 파일 등록",
+  "type": "positive",
+  "preconditions": "첨부 가능한 계정으로 작성 화면 접근, 준비한 파일 크기 확인",
+  "requirement_links": [
+    {
+      "requirement_id": "req-attachment",
+      "requirement_revision": 3,
+      "condition_ids": [
+        "cond-size",
+        "cond-name",
+        "cond-remove"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "step_key": "attach-allowed",
+      "order": 1,
+      "action": "크기가 확인된 25MB 파일을 선택한다.",
+      "expected": "파일이 첨부되고 파일명이 입력 영역에 표시된다.",
+      "test_data": {
+        "account": null,
+        "input": "25MB 파일 1개",
+        "notes": "50MB보다 작은 시험 데이터"
+      },
+      "requirement_links": [
+        {
+          "requirement_id": "req-attachment",
+          "requirement_revision": 3,
+          "condition_ids": [
+            "cond-size",
+            "cond-name"
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "attach-remove",
+      "order": 2,
+      "action": "첨부 입력창의 x 버튼을 클릭한다.",
+      "expected": "첨부 파일이 제거된다.",
+      "test_data": {
+        "account": null,
+        "input": "첨부 파일의 x 버튼",
+        "notes": ""
+      },
+      "requirement_links": [
+        {
+          "requirement_id": "req-attachment",
+          "requirement_revision": 3,
+          "condition_ids": [
+            "cond-remove"
+          ]
+        }
+      ]
+    }
+  ],
+  "test_specification_id": "spec-001"
 }
 ```
 
-type은 positive/negative/boundary, steps는 1..100개의 순서 있는 문자열이다. 원문에 단위·경계 포함 여부가 불분명하면 가정 경고를 붙이고 승인 전 자동 확정하지 않는다. preconditions/input_data/expected는 각 10,000자 이하, 단계는 각 5,000자 이하를 초기 제한으로 삼는다.
-
-생성기는 prediction `{status,reason,verification_run_id,evidence_ids}`를 덧붙일 수 있지만 actual·실제 status는 받지 않는다. 수동 입력의 origin은 manual, 모델 생성은 generated다. 재생성은 새 사양서 후보를 만들며 사용자 편집을 보존한다. 절차 수정 시 사양서 revision도 갱신하고 이전 사양서 revision에 연결된 시험 버전을 보존한다.
+- type은 positive/negative/boundary다. steps는 1..100개 객체이며 각 단계는 step_key·order·action·expected·test_data·requirement_links를 갖는다. order는 1부터 연속, step_key는 시나리오 내 고유하며 순서 변경 시에도 유지한다. 기존 단계를 다른 키로 몰래 바꾸지 않는다. 새 단계는 새 키를 쓴다.
+- requirement_links는 `{requirement_id,requirement_revision,condition_ids[]}`이며 같은 프로젝트의 검토된 revision·조건을 참조한다. 시나리오 링크는 모든 단계 참조의 중복 없는 합집합이다. 서버는 export_section_key·subtopic_id도 검증한다.
+- preconditions·expected·test_data.input/notes는 각 10,000자 이하, action은 5,000자 이하를 초기 제한으로 삼는다. 계정은 역할·시험계정 참조이며 미적용이면 null이다. 비밀번호를 모델이 만들지 않는다.
+- 생성기는 별도 prediction을 제공할 수 있지만 실제 수행 결과는 받지 않는다. 모델 단계 키는 서버가 검증한 후 보존한다. 서버가 최종 ID·test_no를 발급한다. 원문 화면 ID를 시험번호에 그대로 대입하지 않는다.
+- 수동 입력의 origin은 manual, 모델 생성은 generated다. 재생성은 새 후보이며 사용자 편집을 덮어쓰지 않는다. 수정 시 시험·사양서 revision을 증가시키고 이전 단계·예측·실제 수행 회차를 보존한다.
+- procedure PATCH는 전제·시나리오 제목·단계 전체 배열 교체를 허용한다. 개별 단계 값 수정도 전체 steps를 제출하고 base_revision을 확인한다. steps[].expected가 기대 동작의 원본이며 시나리오 최상위 input_data/expected를 중복 저장하지 않는다.
 
 ### 7.2 실제 결과 수정의 하위 계약
 
-기본 UI는 편집 중 로컬 초안만 유지하고 저장 버튼에서 7.3의 배치 API를 호출한다. 아래 개별 생성/PATCH는 저장 서비스의 하위 계약 또는 개별 기록 클라이언트용이다. 화면 열기·편집 진입·값 입력만으로 수행 회차를 생성하지 않는다. client_execution_id는 같은 생성 요청 재시도 시 중복 회차를 막는 UUID다. 같은 ID·같은 입력은 기존 회차를 반환하고, 같은 ID·다른 입력은 409다. 신규 회차의 초기 status는 not_run, actual과 notes는 빈 문자열, version은 1이다.
+기본 UI는 편집 중 로컬 초안을 유지하고 저장 버튼에서 7.3의 배치 API를 호출한다. 개별 생성/PATCH는 하위 저장 서비스 또는 개별 기록 클라이언트용이다. 화면 열기·편집 진입·입력으로 회차를 생성하지 않는다.
+
+회차 생성의 client_execution_id는 UUID다. 같은 ID·같은 요청 재시도는 기존 회차, 같은 ID·다른 요청은 409다. 새 회차의 초기 step_results는 빈 배열, version은 1이며 조회 시 기록 없는 단계는 not_run으로 표현한다. 실제 결과 수정 예:
 
 ```json
 {
   "base_version": 1,
   "client_edit_id": "b5a030a3-66c9-45c7-a0de-df6e1073097d",
-  "status": "failed",
-  "actual": "허용 범위 파일이 10MB 제한 메시지와 함께 거부됨",
-  "notes": "시험 환경과 화면 캡처 식별자 기록",
-  "performed_at": "2026-10-10T05:00:00Z"
+  "step_results": [
+    {
+      "step_key": "attach-allowed",
+      "status": "failed",
+      "actual": "25MB 파일이 10MB 제한 메시지와 함께 거부됨",
+      "notes": "QA 환경에서 사람이 확인한 예시",
+      "performed_at": "2026-10-10T05:00:00Z"
+    }
+  ]
 }
 ```
 
-성공 응답은 전체 TestExecution과 증가한 version·서버 updated_at을 반환한다.
+- step_results는 변경 단계만 받는 upsert 배열이다. 같은 step_key를 중복 제출하거나 해당 test_case_revision에 없는 단계 키를 사용하면 422다. 환경·빌드는 회차 필드이며 절차·기대 결과는 여기서 수정하지 않는다.
+- 각 단계 status는 not_run/passed/failed/on_hold다. passed/failed에는 actual과 performed_at, on_hold에는 사유 notes가 필요하다. 실제 status는 사람이 명시적으로 선택한다. actual/notes는 각 10,000자 이하다.
+- 시나리오 status는 서버가 계산한다: failed가 있으면 failed, 그 외 on_hold가 있으면 on_hold, 모든 절차 단계가 passed이면 passed, 그 외 not_run. 일부만 통과한 경우 전체 통과로 계산하지 않는다. 최상위 status는 수정 요청에 받지 않는다.
+- base_version으로 회차 전체의 동시 수정을 검사한다. 충돌은 409 VERSION_CONFLICT와 current_version이다. client_edit_id + 같은 요청은 이미 저장한 응답을 반환하고 version을 다시 올리지 않는다. 동일 키의 다른 내용은 409다.
+- 성공 응답은 전체 TestExecution과 증가한 version·updated_at이다. 단계 선택 변경·실패/충돌에서도 프런트 초안을 유지한다. 기본 표에서 개별 API를 병렬 호출해 부분 저장하지 않는다.
+- tested_build는 실제 시험 빌드이며 분석 snapshot_id와 같다고 자동 채우지 않는다. 선택 사양서의 절차 revision에 대한 최신 회차만 현재 확인결과에 사용한다.
 
-- PATCH는 변경 필드만 받는다. actual/notes는 각 10,000자 이하. 시험 전제·기대 결과를 여기서 수정하지 않는다.
-- passed/failed는 actual과 performed_at이 필요하고, on_hold는 보류 이유 notes가 필요하다. 상태 변경 후 전체 저장 데이터 기준으로 검증한다. not_run 상태에서도 사용자가 저장을 확정한 결과 초안을 보존할 수 있다.
-- 단순 텍스트 저장이 실제 통과 상태를 자동 설정하지 않는다. 되돌리기도 사용자의 명시적 상태 선택으로만 처리한다.
-- base_version 불일치면 409 VERSION_CONFLICT와 current_version을 반환한다. 프런트는 입력을 보존하고 최신값과 비교한다. 무조건 덮어쓰기 재시도는 하지 않는다.
-- client_edit_id별로 동일 요청 재전송을 판별한다. 동일 요청의 재시도는 이미 저장한 응답을 반환하며 다시 version을 올리지 않는다. 동일 ID의 다른 내용은 409다.
-- 프런트는 저장 버튼의 중복 제출을 막고 해당 저장 요청의 응답만 반영한다. 시험 선택 변경·저장 오류에도 초안을 보존한다. 기본 표 UI에서 여러 개별 API를 병렬 호출해 부분 저장을 만들지 않는다.
-- tested_build는 실제 시험 대상 빌드 식별자다. 코드 예측의 snapshot_id와 다를 수 있으며 서버가 자동으로 같은 것이라고 채우지 않는다.
-
-시험별 최신 **선택된 사양서의 절차 revision에 대한** 회차로 summary를 계산한다. 해당 회차가 없으면 not_run이다. 필터는 requirement_id를 허용하며 `{total,not_run,passed,failed,on_hold}`를 반환한다. 과거 절차의 PASS를 새 절차 통과로 가져오지 않는다.
+execution-summary는 `{scenario_summary:{total,not_run,passed,failed,on_hold},step_summary:{total,not_run,passed,failed,on_hold}}`를 반환한다. 각 분모는 선택된 시나리오 수와 그 단계 수이며 requirement_id 필터는 링크에 해당 요구사항이 있는 시나리오를 선택한다. 단계 기록이 없어도 절차의 모든 단계를 미실행 분모에 포함한다. 과거 절차의 통과를 새 절차로 가져오지 않는다.
 
 ### 7.3 표 편집의 명시적 배치 저장
 
 `POST /api/v2/projects/{p}/test-specifications/{t}/edit-batches`
 
-표 우측 편집 아이콘은 클라이언트 모드만 전환한다. **저장 버튼을 누를 때만** 변경된 시험을 하나의 요청으로 제출한다. 취소·행 선택·포커스 이탈에는 이 API를 호출하지 않는다.
+표 우측 편집 아이콘은 클라이언트 모드만 전환한다. 저장 버튼에서만 변경된 시나리오를 한 요청으로 제출한다. 취소·행 선택·포커스 이탈에는 호출하지 않는다. 요청 예:
 
 ```json
 {
@@ -334,36 +395,81 @@ type은 positive/negative/boundary, steps는 1..100개의 순서 있는 문자�
       "test_case_id": "tc-003",
       "base_test_case_revision": 1,
       "procedure": {
-        "input_data": "단위가 확인된 50MB 파일",
-        "steps": ["공지사항 등록 화면에서 파일을 선택한다.", "저장을 눌러 실제 동작을 확인한다."],
-        "expected": "명세 허용 범위의 파일이 정상 등록된다."
+        "steps": [
+          {
+            "step_key": "attach-allowed",
+            "order": 1,
+            "action": "크기가 확인된 25MB 파일을 선택한다.",
+            "expected": "파일이 첨부되고 파일명이 입력 영역에 표시된다.",
+            "test_data": {
+              "account": null,
+              "input": "25MB 파일 1개",
+              "notes": "50MB보다 작은 시험 데이터"
+            },
+            "requirement_links": [
+              {
+                "requirement_id": "req-attachment",
+                "requirement_revision": 3,
+                "condition_ids": [
+                  "cond-size",
+                  "cond-name"
+                ]
+              }
+            ]
+          },
+          {
+            "step_key": "attach-remove",
+            "order": 2,
+            "action": "첨부 입력창의 x 버튼을 클릭한다.",
+            "expected": "첨부 파일이 제거된다.",
+            "test_data": {
+              "account": null,
+              "input": "첨부 파일의 x 버튼",
+              "notes": ""
+            },
+            "requirement_links": [
+              {
+                "requirement_id": "req-attachment",
+                "requirement_revision": 3,
+                "condition_ids": [
+                  "cond-remove"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "execution": {
         "operation": "create",
         "bind_to": "after_save",
-        "status": "failed",
-        "actual": "50MB 파일이 10MB 제한 메시지와 함께 거부됨",
-        "notes": "QA 환경에서 수행한 결과",
-        "performed_at": "2026-10-10T05:00:00Z"
+        "step_results": [
+          {
+            "step_key": "attach-allowed",
+            "status": "failed",
+            "actual": "25MB 파일이 10MB 제한 메시지와 함께 거부됨",
+            "notes": "QA 환경에서 사람이 확인한 예시",
+            "performed_at": "2026-10-10T05:00:00Z"
+          }
+        ],
+        "environment": "QA"
       }
     }
   ]
 }
 ```
 
-- changes는 1..200개이며 test_case_id 중복을 허용하지 않는다. 수정할 procedure 또는 execution이 하나 이상 있어야 한다. 원문·판정·코드 예측·식별자는 편집 요청으로 변경하지 않는다.
-- procedure는 7.1의 전제·입력·절차·기대 결과 중 변경 필드만 받는다. 기본 표에서는 steps/input_data/expected를 편집한다. 각 항목의 base_test_case_revision을 검사한다.
-- execution.operation=create는 `bind_to:"after_save"`를 사용한다. 같은 배치에서 절차가 바뀌면 새 절차 revision, 안 바뀌면 기존 revision에 새 수행 회차를 만든다. UI에서 임의의 다음 revision 숫자를 계산하지 않는다.
-- 기존 회차 수정은 operation=update와 execution_id/base_version을 받는다. 회차의 절차 revision은 변경할 수 없다. 같은 항목의 절차를 변경하면서 과거 회차를 update하려 하면 409 EXECUTION_REVISION_CONFLICT다. 새 회차 create로 기록해야 한다.
-- 상태·actual·notes·performed_at·environment·tested_build는 7.2의 제한을 따른다. 실제 결과를 수정하지 않은 항목에는 execution을 보내지 않는다. 표를 편집했다는 이유만으로 미실행 회차를 일괄 생성하지 않는다.
-- 서버는 프로젝트·사양서 소속, 사양서 revision, 모든 시험 revision·회차 version, 필드 유효성을 먼저 검증한다. 하나라도 실패하면 **전체를 저장하지 않는다**. 각 갱신은 DB 트랜잭션과 조건부 버전 갱신으로 보장한다.
-- 성공 응답은 `{client_save_id,specification_revision,test_cases:[TestCase],executions:[TestExecution],saved_at}`다. 절차 변경이 있으면 사양서 revision은 배치당 한 번 증가하고, 회차만 바뀌면 사양서 revision은 유지한다. 프런트는 이 응답과 집계 재조회로 읽기 모드를 갱신한다.
-- client_save_id + 동일 요청은 재시도 시 같은 결과를 반환한다. 응답을 받지 못해 재시도해도 회차·revision을 중복 생성하지 않는다. 같은 ID의 다른 요청은 409 IDEMPOTENCY_CONFLICT다. 반환할 저장 결과도 트랜잭션 안에서 기록한다.
-- 충돌·검증 오류 details에 `{items:[{test_case_id,field,code,current_revision?,current_version?}]}`를 반환한다. 실패한 요청 원문이나 키를 오류에 되돌리지 않는다. 프런트는 초안을 보존하고 편집 모드를 유지한다.
-- 절차·입력·기대 결과 변경은 시험 예측을 갱신 필요로 표시한다. 이전 revision의 예측·실제 결과는 그대로 보존한다. 수정된 시험의 prediction.status는 unknown으로 두고 기존 예측을 새 시험의 판정처럼 표시하지 않는다.
-- 저장 중에는 저장·취소·화면 이탈을 잠시 비활성화한다. 변경 없는 세션은 저장 버튼을 비활성화한다. 취소는 클라이언트 초안 폐기만 수행한다.
+- changes는 1..200개이며 test_case_id 중복을 허용하지 않는다. procedure 또는 execution이 하나 이상 필요하다. 원문·코드 판정·예측·기존 식별자를 변경하지 않는다.
+- procedure는 7.1의 title/preconditions/steps 변경 필드다. 단계 편집은 전체 steps 배열을 제출하고 단계 키·순서·링크·필드 제한을 검사한다. 기본 표에서 단계별 action·expected·test_data를 편집한다.
+- operation=create의 bind_to=after_save는 같은 배치에 새 절차가 있으면 새 revision, 없으면 기존 revision에 회차를 만든다. 단계 결과도 확정되는 절차의 step_key에 연결한다. 사용자가 입력하지 않은 단계의 수행 기록을 생성하지 않는다.
+- 기존 회차는 operation=update와 execution_id/base_version으로 수정한다. 회차의 절차 revision은 바꿀 수 없다. 같은 배치에서 절차를 바꾸면서 이전 회차를 update하면 409 EXECUTION_REVISION_CONFLICT다. 새 회차로 기록한다.
+- 상태·actual·notes·performed_at은 step_results 항목에 넣고 environment/tested_build는 회차에 넣는다. 실제 기록을 바꾸지 않은 항목에는 execution을 보내지 않는다.
+- 모든 사양서/시험/회차 버전, 프로젝트 소속, 단계·참조·상태 유효성을 먼저 검사하고 DB 트랜잭션·조건부 갱신으로 전체 성공 또는 전체 미저장을 보장한다. 실패 시 편집 상태와 초안을 유지한다.
+- 성공은 `{client_save_id,specification_revision,test_cases:[TestCase],executions:[TestExecution],saved_at}`다. 절차 변경이 있으면 사양서 revision은 배치당 한 번 증가하고 회차만 바뀌면 유지한다. 목록·단계/시나리오 집계를 갱신한 뒤 읽기 모드로 돌아간다.
+- client_save_id + 동일 요청은 같은 저장 결과를 반환한다. 동일 ID의 다른 요청은 409 IDEMPOTENCY_CONFLICT다. 저장 결과도 트랜잭션 안에 기록한다.
+- 충돌·검증 오류 details는 `{items:[{test_case_id,step_key?,field,code,current_revision?,current_version?}]}`다. 비밀·전체 요청 원문을 반사하지 않는다. 절차 수정 시 이전 예측은 보존하고 새 revision의 prediction.status는 unknown/갱신 필요다.
+- 저장 중 중복 제출·취소·이탈을 막고, 변경 없는 세션은 저장을 비활성화한다. 취소는 초안 폐기이며 API 호출이 없다.
 
-이 API는 개발 목표다. Figma의 저장 프로토타입은 예시 변수만 갱신하며, 실제 DB 저장·트랜잭션을 구현한 상태가 아니다.
+개발 목표 계약이다. 이전 Figma 프로토타입은 예시 시나리오 수준 편집·변수 갱신이며, 새 단계별 데이터 연결과 실제 DB 트랜잭션은 구현 예정이다.
 
 ## 8. 작업·산출물 API (개발 목표)
 
@@ -373,7 +479,7 @@ type은 positive/negative/boundary, steps는 1..100개의 순서 있는 문자�
 | GET | `/projects/{p}/jobs/{j}` | → Job |
 | GET | `/projects/{p}/jobs/{j}/events` | Last-Event-ID → SSE |
 | POST | `/projects/{p}/exports/traceability` | `{verification_run_id,format:"xlsx"}` → 202 Job |
-| POST | `/projects/{p}/exports/test-specification` | `{test_specification_id,revision,execution_selection:"latest_per_case",format:"xlsx"}` → 202 Job |
+| POST | `/projects/{p}/exports/test-specification` | `{test_specification_id,revision,execution_selection:"latest_per_case",template_id:"thinktree-test-spec-v1",include_analysis_detail:false,format:"xlsx"}` → 202 Job |
 | GET | `/projects/{p}/artifacts/{a}/download` | → 200 XLSX 바이너리 |
 
 Job 예:
@@ -397,6 +503,8 @@ progress가 있으면 `{stage,completed,total}`이며 단계 수치다. 근거 �
 작업 상태는 queued→running→completed/failed, 시작 전 차단은 blocked다. cancelled는 서버가 실제 취소를 지원할 때만 사용한다. blocked·failed를 completed로 바꾸어 보이지 않는다. 워커 미연결 상태에서는 blocked와 missing_features를 저장한다.
 
 SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/failed/blocked), `data`(JSON). 최종 이벤트 이후 연결을 닫고, 재연결 시 Last-Event-ID 이후 이벤트를 전달한다. 이벤트 유실 시 GET 폴링으로 복구한다. 이는 새 구현 목표이며 현재 단일 이벤트 SSE의 기능이 아니다.
+
+시험 출력은 [원본 템플릿 매핑](TEST_OUTPUT_SPEC.md#4-json--원본-excel-열-매핑)을 따르며 한 시나리오의 단계 수만큼 A:J 행을 만든다. F는 expected, J는 실제 O/X/보류/미실행 빈 셀이다. 메타데이터·개정이력·목차·기능별 시트를 유지하고 모델 예측을 확인결과로 내보내지 않는다. include_analysis_detail=true일 때만 별도 분석 상세 시트에 코드 예측·근거·원문·실제 결과 상세·수행 메모를 추가한다. 작성자·확인자·시행일은 저장 메타데이터/실제 수행에서 가져오고 없는 값은 비운다. template_id는 서버의 허용 프로필만 사용한다. 보고서 조합 예시는 [test-report.json](examples/test-report.json)이며 모델 응답과 별도다.
 
 출력 작업은 접수 시 선택 실행·사양서 revision·각 시험별 수행 회차 ID를 고정한다. 빈 결과는 409 EMPTY_EXPORT. 다운로드 Content-Type은 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, Content-Disposition은 attachment 및 안전한 filename이다. 권한 검사·프로젝트 소유 검사 후 다운로드한다. artifact의 실제 보관·만료 정책은 운영 구성에서 별도로 정한다.
 
