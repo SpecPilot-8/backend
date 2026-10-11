@@ -25,7 +25,9 @@ class Database:
 
     def initialize(self):
         from api import models  # noqa: F401
-        Base.metadata.create_all(self.engine)
+        Base.metadata.create_all(self.engine, tables=[t for t in Base.metadata.sorted_tables if not t.name.startswith("api_v2_")])
+        from api.v2.migrations import upgrade
+        upgrade(self.engine)
 
     @contextmanager
     def session(self):
