@@ -10,6 +10,8 @@ from api.routes import router
 from api.models import new_id
 from api.v2.core import router as v2_core
 from api.v2.documents import router as v2_documents
+from api.v2.code import router as v2_code
+from api.v2.verification import router as v2_verification
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -44,6 +46,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(router)
     app.include_router(v2_core)
     app.include_router(v2_documents)
+    app.include_router(v2_code)
+    app.include_router(v2_verification)
     return app
 
 
