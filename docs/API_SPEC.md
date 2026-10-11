@@ -155,6 +155,8 @@ ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabiliti
 
 출처 인용은 원문 블록 텍스트와 일치해야 한다. 사용자 작성 추가 조건은 `origin:"manual"`, `source_refs:[]`와 작성 이유를 허용하지만 모델 추출 조건에 출처 생략을 허용하지 않는다.
 
+조건 ID는 요구사항 revision에 속한다. related_condition_ids는 같은 프로젝트·문서 개정의 과거 조건도 참조할 수 있으며 소유 요구사항이 수정되어도 기존 참조를 보존한다. 본인 개정의 조건끼리 연결한 ID는 새 개정 ID로 치환한다. 오래된 base_revision은 조건 내용 처리에 앞서 409 VERSION_CONFLICT로 알리고 저장 시에도 조건부 갱신으로 검사한다. GET 출처의 location은 서버가 조인한 읽기 전용 값이며 쓰기 요청의 source_refs에는 block_id·quote만 제출한다.
+
 ## 6. 코드·검증 API (개발 목표)
 
 | 메서드 | 경로 | 입력 → 결과 |

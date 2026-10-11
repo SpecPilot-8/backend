@@ -6,12 +6,13 @@ from typing import Annotated, Literal
 import pymupdf
 from fastapi import APIRouter, File, UploadFile, Query
 from pydantic import Field, model_validator
+from sqlalchemy import select
 
 from api.errors import APIError
 from api.models import new_id
 from api.v2.common import Config, DB, Input, Limit, Offset, RevisionQuery, make_job, missing
 from api.v2.document_contracts import validate_extraction
-from api.v2.storage import all_resources, create, page, project, public, replace, resource
+from api.v2.storage import Revision, all_resources, create, page, project, public, replace, resource
 
 router = APIRouter(prefix='/api/v2/projects/{p}', tags=['v2 문서·요구사항'])
 
@@ -144,9 +145,14 @@ def condition_payloads(db, p, data, old=None):
         refs_valid(c['source_refs'], blocks.data['blocks'])
         result.append(c)
     id_mapping = {x['id']: y['id'] for x, y in zip(data['conditions'], result) if x.get('id')}
-    allowed = set(id_mapping) | {c['id'] for r in all_resources(db, p, 'requirement')
-                                if r.data['document_id'] == data['document_id'] and r.data['document_revision'] == data['document_revision']
-                                for c in r.data['conditions'] if not old or r.id != old.get('id')}
+    related_requirements = [r for r in all_resources(db, p, 'requirement')
+                            if r.data['document_id'] == data['document_id'] and r.data['document_revision'] == data['document_revision']
+                            and (not old or r.id != old.get('id'))]
+    allowed = set(id_mapping) | {c['id'] for r in related_requirements for c in r.data['conditions']}
+    # Condition IDs belong to immutable revisions, including other requirements' history.
+    for revision in db.scalars(select(Revision).where(Revision.resource_id.in_([r.id for r in related_requirements]))):
+        if (revision.data.get('document_id'), revision.data.get('document_revision')) == (data['document_id'], data['document_revision']):
+            allowed.update(c['id'] for c in revision.data['conditions'])
     for c in result:
         if not set(c['related_condition_ids']) <= allowed:
             raise APIError(422, 'VALIDATION_ERROR', '관련 조건 ID가 해당 문서에 없습니다')
@@ -351,6 +357,7 @@ def get_requirement(p: str, r: str, db: DB, revision: RevisionQuery = None):
 @router.patch('/requirements/{r}')
 def edit_requirement(p: str, r: str, body: RequirementEdit, db: DB):
     item = resource(db, p, r, 'requirement')
+    check_requirement_revision(item, body.base_revision)
     data = {**deepcopy(item.data), **body.model_dump(exclude_unset=True, exclude={'base_revision'})}
     if 'conditions' not in body.model_fields_set:
         data['conditions'] = deepcopy(item.data['conditions'])
@@ -362,10 +369,17 @@ def edit_requirement(p: str, r: str, body: RequirementEdit, db: DB):
 @router.put('/requirements/{r}/review')
 def approve(p: str, r: str, body: ReviewRequest, db: DB):
     item = resource(db, p, r, 'requirement')
+    check_requirement_revision(item, body.base_revision)
     data = deepcopy(item.data)
     data['conditions'] = condition_payloads(db, p, data, public(item))
     data.update(revision=body.base_revision + 1, review_status='approved')
     return requirement_out(db, replace(db, item, data, body.base_revision))
+
+
+def check_requirement_revision(item, base_revision):
+    if item.version != base_revision:
+        raise APIError(409, 'VERSION_CONFLICT', '다른 수정이 먼저 저장되었습니다',
+                       details={'current_version': item.version, 'current_revision': item.version})
 
 
 def ingest_extraction(db, p, d, draft):
