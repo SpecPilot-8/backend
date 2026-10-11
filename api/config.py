@@ -12,6 +12,7 @@ class Settings:
     max_source_bytes: int = 30 * 1024 * 1024
     max_source_files: int = 3000
     max_source_file_bytes: int = 1024 * 1024
+    max_export_rows: int = 10000
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
 
     @classmethod
