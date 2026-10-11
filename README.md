@@ -20,15 +20,21 @@ pip install -r requirements-dev.txt
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Swagger: <http://127.0.0.1:8000/docs>. 현재 연결된 기능은 `/api/v1/capabilities`에서 확인한다.
+Swagger: <http://127.0.0.1:8000/docs>. 새 기능·지원 범위·한도는 `/api/v2/capabilities`에서 확인한다. 기존 `/api/v1`은 유지한다.
 기본 DB는 `.data/api.sqlite3`이며 `SPECPILOT_DATABASE_URL`로 PostgreSQL URL을 설정할 수 있다.
-문서 API 기능 브랜치에서는 업로드 원본을 `.data/uploads/`에 저장하도록 구성했다. 현재 체크아웃의 연결 범위는 아래 목록을 따른다. `SPECPILOT_WORKSPACE_ROOT`로 허용 프로젝트 루트를 지정한다.
+원본은 `.data/uploads/`, 출력은 `.data/artifacts/`에 저장한다. `SPECPILOT_DATA_DIR`로 데이터 경로, `SPECPILOT_WORKSPACE_ROOT`로 로컬 코드의 허용 루트를 지정한다.
 HTTP AI 호출은 연결하지 않았으며 키를 저장하지 않는다. 일본어 번역은 제외한다. MVP는 모델 하나를 사용하고, 지원 프로필·키를 통한 여러 모델 전환은 후속 확장이다.
-API의 `api_*` 테이블은 기존 CLI 샘플 테이블과 분리한다. 현재는 로컬 개발용이며 인증·운영 마이그레이션은 미구현이다.
+v2의 `api_v2_*` 테이블은 기존 v1/CLI 테이블과 분리한다. 앱 시작 시 가산 마이그레이션을 적용하며 기존 데이터를 자동 변환하지 않는다. 현재는 로컬 개발용이며 인증·운영 배포 마이그레이션 단일 실행·운영 DB 검증이 필요하다.
 
 현재 구현 범위:
 
-- [FastAPI 서버와 프로젝트 관리 기반 추가](docs/api-core.md)
+- v2 프로젝트·모델 상태·작업 저장/조회, PDF 기본 텍스트 파싱과 좌표·부분/실패 경고
+- 요구사항 수동 작성·검토·개정 이력, ZIP/로컬 코드 청킹·불변 스냅샷
+- 검증 접수·미분석 추적표/통계/상세, 모델 출력 계약 검증 및 저장 경계
+- 단계별 시험 수동 작성·절차 개정·수행 회차·원자적 표 배치 저장·충돌/재시도
+- 추적표 및 제공 양식의 테스트 사양서 Excel 출력·프로젝트별 다운로드
+
+자동 요구사항 추출·코드 판정·시험 생성은 모델 미연결로 blocked다. 모델 키 저장·설정 변경·연결 확인은 501이다. 정확한 경로·후속 담당과 현재 가능한 수동 흐름은 [구현·연동 상태](docs/IMPLEMENTATION_STATUS.md)를 확인한다. 기능별 PR은 의존 순서대로 올라가 있으며 main에 아직 병합하지 않았다.
 
 검증: `python -m pytest -q`, `python -m ruff check api services tests`.
 
