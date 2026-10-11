@@ -14,7 +14,7 @@ RevisionQuery = Annotated[int | None, Query(ge=1)]
 
 
 class Input(BaseModel):
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
 
 
 def missing(code, message):

@@ -4,7 +4,7 @@
 
 관련 문서: [기능명세](FUNCTIONAL_SPEC.md), [모델 담당·내부 입출력](MODEL_TEAM_GUIDE.md).
 
-**2절은 실제 코드 확인 결과, 3절 이후는 새 UI를 위한 개발 목표 계약**이다. 문서 작성만으로 엔드포인트가 추가되지 않는다. 현재 Swagger는 현재 체크아웃의 구현만 보여준다.
+**2절은 이전 코드 확인 기록, 3절 이후는 새 UI를 위한 계약**이다. 2026-10-11부터 v2 기능을 별도 PR로 구현 중이며 실제 연결 범위와 미연결 API는 [구현·연동 상태](IMPLEMENTATION_STATUS.md)를 따른다. 문서 작성만으로 엔드포인트가 추가되지 않는다. 현재 Swagger는 현재 체크아웃의 구현만 보여준다.
 
 ## 1. 계약의 기본 규칙
 
@@ -139,7 +139,7 @@ ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabiliti
 | POST | `/projects/{p}/documents/{d}/parse` | `{document_revision}` → 202 Job |
 | GET | `/projects/{p}/documents/{d}/blocks` | location_kind,index,limit,offset → Page[SourceBlock] |
 | GET | `/projects/{p}/documents/{d}/outline` | → `{document_revision,items:[{title,location,block_ids}]}` |
-| POST | `/projects/{p}/documents/{d}/requirements/extract` | `{document_revision,model_config_version}` → 202 Job |
+| POST | `/projects/{p}/documents/{d}/requirements/extract` | `{document_revision,model_config_version,accept_warnings?:false}` → 202 Job |
 | GET | `/projects/{p}/documents/{d}/requirement-groups` | document_revision → `{document_revision,topics:[Topic + subtopics[]]}` |
 | GET | `/projects/{p}/requirements` | document_id,document_revision,topic_id,subtopic_id,review_status,screen_id,q,limit,offset → Page[Requirement] |
 | GET | `/projects/{p}/requirements/{r}` | revision 생략 시 최신 → Requirement |
@@ -149,9 +149,9 @@ ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabiliti
 
 문서 업로드 기본 제한 20MiB(현행 Settings 값). v2 구현에서는 실제 적용·반환하는 지원 포맷 및 한도를 capabilities로 공개한다. 확장자·내용 검증, 압축/이미지 처리 제한을 둔다. 파일 읽기 실패를 빈 명세 성공으로 반환하지 않는다.
 
-추출 요청은 parsed 또는 경고를 확인한 partial 문서에만 허용한다. 실행 결과 요구사항은 검토 전 상태다. 팀원 1의 내부 결과를 서버가 검증·ID 부여·저장한다. 내부 추출 계약 2.2의 주제·소주제 키와 출처는 [출력 계약](PARSER_OUTPUT_SPEC.md), [JSON Schema](schemas/requirement-extraction.schema.json)를 따른다. 서버는 key를 topic_id·subtopic_id로, base_screen_key를 base_screen_id로 치환하고 사용자 검토 상태를 지정한다. PATCH conditions는 해당 revision의 전체 조건 목록으로 교체하며 삭제된 조건도 과거 revision에 보존한다. 수정하면 approved를 pending으로 되돌린다. 검토 확정 요청도 revision을 증가시키므로 이후 검증에는 반환된 revision을 쓴다.
+추출 요청은 parsed 또는 경고를 확인한 partial 문서에만 허용한다. partial에서는 accept_warnings=true로 확인을 명시하고 누락하면 409 DOCUMENT_WARNINGS_NOT_ACCEPTED다. 현재 기본 PDF 파싱은 레이아웃 의미 인식·OCR 미연결 경고가 있는 partial 결과이며 목차가 비어 있을 수 있다. 실행 결과 요구사항은 검토 전 상태다. 팀원 1의 내부 결과를 서버가 검증·ID 부여·저장한다. 내부 추출 계약 2.2의 주제·소주제 키와 출처는 [출력 계약](PARSER_OUTPUT_SPEC.md), [JSON Schema](schemas/requirement-extraction.schema.json)를 따른다. 서버는 key를 topic_id·subtopic_id로, base_screen_key를 base_screen_id로 치환하고 사용자 검토 상태를 지정한다. PATCH conditions는 해당 revision의 전체 조건 목록으로 교체하며 삭제된 조건도 과거 revision에 보존한다. 수정하면 approved를 pending으로 되돌린다. 검토 확정 요청도 revision을 증가시키므로 이후 검증에는 반환된 revision을 쓴다.
 
-그룹 조회와 요구사항 목록은 같은 문서 revision을 지정해 사용한다. topic_id·subtopic_id·screen_id는 선택 문서 revision 소속을 검사하고 서로 충돌하는 필터 조합은 422로 거부한다. 주제·소주제의 제목만으로 다른 문서를 합치지 않는다. PATCH의 subtopic_id도 같은 문서 revision에서만 허용하고 새 요구사항 revision을 생성한다. 새 주제·소주제를 직접 생성·이름 변경하는 API는 후속 범위다. 수동 추가에서도 subtopic_id를 지정하며 미분류 그룹은 서버가 해당 문서 revision에 생성할 수 있다. 추적표 행은 `topic_id,subtopic_id,topic_title,subtopic_title`도 포함해 경로를 표시한다. 과거 실행에는 당시 그룹 경로를 보존하며 최신 문서의 이름으로 바꾸지 않는다.
+그룹 조회와 요구사항 목록은 같은 문서 revision을 지정해 사용한다. topic_id·subtopic_id·screen_id는 선택 문서 revision 소속을 검사하고 서로 충돌하는 필터 조합은 422로 거부한다. 주제·소주제의 제목만으로 다른 문서를 합치지 않는다. PATCH의 subtopic_id도 같은 문서 revision에서만 허용하고 새 요구사항 revision을 생성한다. 새 주제·소주제를 직접 생성·이름 변경하는 API는 후속 범위다. 수동 추가는 document_id/document_revision/title/author_reason/conditions를 받는다. origin은 manual이며 source_refs는 비울 수 있다. subtopic_id를 생략하면 서버가 해당 문서 revision의 미분류 그룹을 생성한다. 조건 쓰기는 stable_key/text/category/target/verifiable를 필수로 받으며 나머지 값은 기본값을 사용한다. 수정에서는 기존 조건 id를 함께 제출할 수 있고 새 revision에 새 조건 ID를 발급한다. 추적표 행은 `topic_id,subtopic_id,topic_title,subtopic_title`도 포함해 경로를 표시한다. 과거 실행에는 당시 그룹 경로를 보존하며 최신 문서의 이름으로 바꾸지 않는다.
 
 출처 인용은 원문 블록 텍스트와 일치해야 한다. 사용자 작성 추가 조건은 `origin:"manual"`, `source_refs:[]`와 작성 이유를 허용하지만 모델 추출 조건에 출처 생략을 허용하지 않는다.
 

@@ -9,6 +9,7 @@ from api.errors import install_handlers
 from api.routes import router
 from api.models import new_id
 from api.v2.core import router as v2_core
+from api.v2.documents import router as v2_documents
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -42,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_handlers(app)
     app.include_router(router)
     app.include_router(v2_core)
+    app.include_router(v2_documents)
     return app
 
 
