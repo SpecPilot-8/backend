@@ -4,7 +4,7 @@
 
 관련 문서: [기능명세](FUNCTIONAL_SPEC.md), [모델 담당·내부 입출력](MODEL_TEAM_GUIDE.md).
 
-**2절은 이전 코드 확인 기록, 3절 이후는 새 UI를 위한 계약**이다. 2026-10-11부터 v2 기능을 별도 PR로 구현 중이며 실제 연결 범위와 미연결 API는 [구현·연동 상태](IMPLEMENTATION_STATUS.md)를 따른다. 문서 작성만으로 엔드포인트가 추가되지 않는다. 현재 Swagger는 현재 체크아웃의 구현만 보여준다.
+**2절은 이전 코드 확인 기록, 3절 이후는 새 UI를 위한 계약**이다. 2026-10-11에 v2 기능을 별도 PR로 구현해 main에 병합했으며 실제 연결 범위와 미연결 API는 [구현·연동 상태](IMPLEMENTATION_STATUS.md)를 따른다. 문서 작성만으로 엔드포인트가 추가되지 않는다. 현재 Swagger는 현재 체크아웃의 구현만 보여준다.
 
 ## 1. 계약의 기본 규칙
 
@@ -60,7 +60,7 @@ JobOut: `id,project_id,operation,status,snapshot_id,model_config_snapshot,missin
 
 ## 3. 공통 상태·데이터
 
-2026-10-11의 누적 v2 브랜치는 4~8절의 HTTP 경로를 등록한다. 실제 모델 처리는 미연결이며 해당 요청은 blocked/501로 사유를 반환한다. 실제 가능한 작업·추가 개발·PR 의존 순서는 [구현·연동 상태](IMPLEMENTATION_STATUS.md)를 확인한다. 현재 OpenAPI(`/openapi.json`)가 요청 필드·필수 값·enum의 실행 기준이며 본 문서의 완료 응답 예시는 모델 연결 후 목표와 구분한다.
+2026-10-11의 main은 4~8절의 v2 HTTP 경로를 등록한다. 실제 모델 처리는 미연결이며 해당 요청은 blocked/501로 사유를 반환한다. 실제 가능한 작업·추가 개발·PR 의존 순서는 [구현·연동 상태](IMPLEMENTATION_STATUS.md)를 확인한다. 현재 OpenAPI(`/openapi.json`)가 요청 필드·필수 값·enum의 실행 기준이며 본 문서의 완료 응답 예시는 모델 연결 후 목표와 구분한다.
 
 ### 3.1 상태를 섞지 않는다
 
