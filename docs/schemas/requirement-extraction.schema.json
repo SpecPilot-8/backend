@@ -1,0 +1,383 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "const": "2.1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "document_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Topic"
+      },
+      "minItems": 0
+    },
+    "screens": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Screen"
+      },
+      "minItems": 0
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Requirement"
+      },
+      "minItems": 0
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Warning"
+      },
+      "minItems": 0
+    }
+  },
+  "required": [
+    "contract_version",
+    "document_id",
+    "document_revision",
+    "topics",
+    "screens",
+    "requirements",
+    "warnings"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SpecPilot 기획서 요구사항 추출 초안 2.1",
+  "$defs": {
+    "SourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "block_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "block_id",
+        "quote"
+      ]
+    },
+    "Topic": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title_origin": {
+          "enum": [
+            "extracted",
+            "inferred",
+            "unclassified"
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "minItems": 0
+        },
+        "review_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "subtopics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Subtopic"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "key",
+        "title",
+        "title_origin",
+        "source_refs",
+        "review_reasons",
+        "subtopics"
+      ]
+    },
+    "Subtopic": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title_origin": {
+          "enum": [
+            "extracted",
+            "inferred",
+            "unclassified"
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "minItems": 0
+        },
+        "review_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "screen_keys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "key",
+        "title",
+        "title_origin",
+        "source_refs",
+        "review_reasons",
+        "screen_keys"
+      ]
+    },
+    "Screen": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "screen_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_block_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        }
+      },
+      "required": [
+        "screen_key",
+        "title",
+        "source_block_ids"
+      ]
+    },
+    "Condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stable_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "enum": [
+            "validation",
+            "navigation",
+            "business_logic",
+            "data",
+            "error_message"
+          ]
+        },
+        "target": {
+          "enum": [
+            "frontend",
+            "backend",
+            "both",
+            "unknown"
+          ]
+        },
+        "verifiable": {
+          "enum": [
+            "code",
+            "not_statically_verifiable"
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "minItems": 1
+        },
+        "ambiguity": {
+          "type": "string"
+        },
+        "related_condition_keys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "stable_key",
+        "text",
+        "category",
+        "target",
+        "verifiable",
+        "source_refs",
+        "ambiguity",
+        "related_condition_keys"
+      ]
+    },
+    "Requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stable_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subtopic_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "screen_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "original_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "condition": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "expected": {
+          "type": "string"
+        },
+        "req_type": {
+          "enum": [
+            "functional",
+            "non_functional"
+          ]
+        },
+        "origin": {
+          "const": "extracted"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "minItems": 1
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "minItems": 1
+        },
+        "review_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "stable_key",
+        "subtopic_key",
+        "screen_key",
+        "title",
+        "original_text",
+        "condition",
+        "action",
+        "expected",
+        "req_type",
+        "origin",
+        "source_refs",
+        "conditions",
+        "review_reasons"
+      ]
+    },
+    "Warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "block_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "block_ids"
+      ]
+    }
+  }
+}

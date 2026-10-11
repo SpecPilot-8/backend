@@ -1,0 +1,15 @@
+{
+  "contract_version": "2.1",
+  "document_id": "doc-empty",
+  "document_revision": 1,
+  "topics": [],
+  "screens": [],
+  "requirements": [],
+  "warnings": [
+    {
+      "code": "NO_REQUIREMENTS",
+      "message": "읽은 블록에서 요구사항을 추출하지 못했습니다. 성공적인 명세 생성으로 저장하지 마세요.",
+      "block_ids": []
+    }
+  ]
+}
