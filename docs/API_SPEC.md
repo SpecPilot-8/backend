@@ -262,8 +262,8 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
 |---|---|---|
 | POST | `/projects/{p}/test-specifications/generate` | `{verification_run_id,requirement_ids}` → 202 Job |
 | GET | `/projects/{p}/test-specifications` | limit,offset → Page[사양서 메타데이터] |
-| GET | `/projects/{p}/test-specifications/{t}` | → `{id,verification_run_id,revision,status,test_case_ids}` |
-| GET | `/projects/{p}/test-cases` | test_specification_id,requirement_id?,limit,offset → Page[TestCase] |
+| GET | `/projects/{p}/test-specifications/{t}` | revision 생략 시 최신 → `{id,verification_run_id,revision,status,test_case_ids}` |
+| GET | `/projects/{p}/test-cases` | test_specification_id,requirement_id?,specification_revision?,limit,offset → Page[TestCase] |
 | GET | `/projects/{p}/test-cases/{tc}` | revision 생략 시 최신 → TestCase |
 | POST | `/projects/{p}/test-cases` | 아래 절차 데이터 + test_specification_id → 201 TestCase |
 | PATCH | `/projects/{p}/test-cases/{tc}/procedure` | `{base_revision,...변경 절차}` → 새 revision TestCase |
@@ -342,7 +342,7 @@ TestCase는 시험번호 하나의 시나리오이며 Excel 한 행은 그 안�
 }
 ```
 
-- type은 positive/negative/boundary다. steps는 1..100개 객체이며 각 단계는 step_key·order·action·expected·test_data·requirement_links를 갖는다. order는 1부터 연속, step_key는 시나리오 내 고유하며 순서 변경 시에도 유지한다. 기존 단계를 다른 키로 몰래 바꾸지 않는다. 새 단계는 새 키를 쓴다.
+- type은 positive/negative/boundary다. 서버 제공 출력 영역은 login/signup/password_find/notice/mypage/authorization/general이며 일반 문서의 다른 기능은 general에서 원문 주제·소주제로 분류한다. 이 목록은 capabilities의 export_profiles에 공개한다. steps는 1..100개 객체이며 각 단계는 step_key·order·action·expected·test_data·requirement_links를 갖는다. order는 1부터 연속, step_key는 시나리오 내 고유하며 순서 변경 시에도 유지한다. 기존 단계를 다른 키로 몰래 바꾸지 않는다. 새 단계는 새 키를 쓴다.
 - requirement_links는 `{requirement_id,requirement_revision,condition_ids[]}`이며 같은 프로젝트의 검토된 revision·조건을 참조한다. 시나리오 링크는 모든 단계 참조의 중복 없는 합집합이다. 서버는 export_section_key·subtopic_id도 검증한다.
 - preconditions·expected·test_data.input/notes는 각 10,000자 이하, action은 5,000자 이하를 초기 제한으로 삼는다. 계정은 역할·시험계정 참조이며 미적용이면 null이다. 비밀번호를 모델이 만들지 않는다.
 - 생성기는 별도 prediction을 제공할 수 있지만 실제 수행 결과는 받지 않는다. 모델 단계 키는 서버가 검증한 후 보존한다. 서버가 최종 ID·test_no를 발급한다. 원문 화면 ID를 시험번호에 그대로 대입하지 않는다.
@@ -378,7 +378,7 @@ TestCase는 시험번호 하나의 시나리오이며 Excel 한 행은 그 안�
 - 성공 응답은 전체 TestExecution과 증가한 version·updated_at이다. 단계 선택 변경·실패/충돌에서도 프런트 초안을 유지한다. 기본 표에서 개별 API를 병렬 호출해 부분 저장하지 않는다.
 - tested_build는 실제 시험 빌드이며 분석 snapshot_id와 같다고 자동 채우지 않는다. 선택 사양서의 절차 revision에 대한 최신 회차만 현재 확인결과에 사용한다.
 
-execution-summary는 `{scenario_summary:{total,not_run,passed,failed,on_hold},step_summary:{total,not_run,passed,failed,on_hold}}`를 반환한다. 각 분모는 선택된 시나리오 수와 그 단계 수이며 requirement_id 필터는 링크에 해당 요구사항이 있는 시나리오를 선택한다. 단계 기록이 없어도 절차의 모든 단계를 미실행 분모에 포함한다. 과거 절차의 통과를 새 절차로 가져오지 않는다.
+execution-summary는 revision(생략 시 최신), requirement_id, execution_selection=latest_per_case를 받고 `{scenario_summary:{total,not_run,passed,failed,on_hold},step_summary:{total,not_run,passed,failed,on_hold}}`를 반환한다. 각 분모는 선택된 시나리오 수와 그 단계 수이며 requirement_id 필터는 링크에 해당 요구사항이 있는 시나리오를 선택한다. 단계 기록이 없어도 절차의 모든 단계를 미실행 분모에 포함한다. 과거 절차의 통과를 새 절차로 가져오지 않는다.
 
 ### 7.3 표 편집의 명시적 배치 저장
 
@@ -469,7 +469,7 @@ execution-summary는 `{scenario_summary:{total,not_run,passed,failed,on_hold},st
 - 충돌·검증 오류 details는 `{items:[{test_case_id,step_key?,field,code,current_revision?,current_version?}]}`다. 비밀·전체 요청 원문을 반사하지 않는다. 절차 수정 시 이전 예측은 보존하고 새 revision의 prediction.status는 unknown/갱신 필요다.
 - 저장 중 중복 제출·취소·이탈을 막고, 변경 없는 세션은 저장을 비활성화한다. 취소는 초안 폐기이며 API 호출이 없다.
 
-개발 목표 계약이다. 이전 Figma 프로토타입은 예시 시나리오 수준 편집·변수 갱신이며, 새 단계별 데이터 연결과 실제 DB 트랜잭션은 구현 예정이다.
+2026-10-11 v2 표 저장 구현은 [구현 상태](IMPLEMENTATION_STATUS.md)를 따른다. 이전 Figma 프로토타입은 예시 시나리오 수준 편집·변수 갱신이며, 서버 DB 저장과 별도이며 프런트 연결이 필요하다.
 
 ## 8. 작업·산출물 API (개발 목표)
 

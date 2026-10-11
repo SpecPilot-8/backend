@@ -12,6 +12,7 @@ from api.v2.core import router as v2_core
 from api.v2.documents import router as v2_documents
 from api.v2.code import router as v2_code
 from api.v2.verification import router as v2_verification
+from api.v2.testing import router as v2_testing
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -48,6 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(v2_documents)
     app.include_router(v2_code)
     app.include_router(v2_verification)
+    app.include_router(v2_testing)
     return app
 
 

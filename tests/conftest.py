@@ -102,3 +102,24 @@ def v2_run(client, v2_project, v2_requirement, v2_snapshot):
     assert job.status_code == 202, job.text
     run = client.get(f'/api/v2/projects/{v2_project}/verification-runs').json()['items'][-1]
     return run
+
+
+@pytest.fixture
+def v2_specification(client, v2_project, v2_run):
+    body = {'verification_run_id': v2_run['id'], 'requirement_ids': [r['requirement_id'] for r in v2_run['requirement_versions']]}
+    r = client.post(f'/api/v2/projects/{v2_project}/test-specifications/generate', json=body)
+    assert r.status_code == 202 and r.json()['status'] == 'blocked', r.text
+    return client.get(f'/api/v2/projects/{v2_project}/test-specifications').json()['items'][-1]
+
+
+@pytest.fixture
+def v2_case(client, v2_project, v2_specification, v2_requirement):
+    req = client.get(f'/api/v2/projects/{v2_project}/requirements/{v2_requirement["id"]}?revision=2').json()
+    links = [{'requirement_id': req['id'], 'requirement_revision': 2, 'condition_ids': [req['conditions'][0]['id']]}]
+    body = {'test_specification_id': v2_specification['id'], 'export_section_key': 'notice', 'subtopic_id': req['subtopic_id'],
+            'title': '제목 경계 시험', 'type': 'boundary', 'preconditions': '작성 화면', 'requirement_links': links,
+            'steps': [{'step_key': f'step-{i}', 'order': i, 'action': f'{i}번째 입력', 'expected': '명세대로 동작',
+                       'test_data': {'account': None, 'input': '50자', 'notes': ''}, 'requirement_links': links} for i in [1, 2]]}
+    r = client.post(f'/api/v2/projects/{v2_project}/test-cases', json=body)
+    assert r.status_code == 201, r.text
+    return r.json()
