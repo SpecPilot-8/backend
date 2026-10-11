@@ -1,5 +1,5 @@
 {
-  "contract_version": "2.0",
+  "contract_version": "2.1",
   "document_id": "doc-unclassified",
   "document_revision": 1,
   "content_hash": "sha256:example",
@@ -7,13 +7,19 @@
   "blocks": [
     {
       "id": "block-004-01",
-      "text": "첨부 파일은 최대 300MB까지 등록할 수 있다.",
+      "text": "첨부 파일은 최대 50MB까지 등록할 수 있다.",
       "location": {
         "kind": "page",
         "index": 4
       },
       "extraction_method": "text",
-      "warnings": []
+      "warnings": [],
+      "structure": {
+        "section": "paragraph",
+        "label": null,
+        "parent_block_id": null,
+        "reading_order": 1
+      }
     },
     {
       "id": "block-004-02",
@@ -23,7 +29,13 @@
         "index": 4
       },
       "extraction_method": "text",
-      "warnings": []
+      "warnings": [],
+      "structure": {
+        "section": "paragraph",
+        "label": null,
+        "parent_block_id": null,
+        "reading_order": 2
+      }
     }
   ],
   "unread_locations": [],

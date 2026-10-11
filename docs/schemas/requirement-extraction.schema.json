@@ -3,7 +3,7 @@
   "additionalProperties": false,
   "properties": {
     "contract_version": {
-      "const": "2.1"
+      "const": "2.2"
     },
     "document_id": {
       "type": "string",
@@ -52,7 +52,7 @@
     "warnings"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "SpecPilot 기획서 요구사항 추출 초안 2.1",
+  "title": "SpecPilot 기획서 요구사항 추출 초안 2.2",
   "$defs": {
     "SourceRef": {
       "type": "object",
@@ -195,12 +195,50 @@
           },
           "uniqueItems": true,
           "minItems": 1
+        },
+        "source_title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_screen_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "depth_path": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "view_type": {
+          "enum": [
+            "page",
+            "error_state",
+            "dialog",
+            "unknown"
+          ]
+        },
+        "base_screen_key": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "screen_key",
         "title",
-        "source_block_ids"
+        "source_block_ids",
+        "source_title",
+        "source_screen_id",
+        "depth_path",
+        "view_type",
+        "base_screen_key"
       ]
     },
     "Condition": {
@@ -255,6 +293,16 @@
             "minLength": 1
           },
           "uniqueItems": true
+        },
+        "constraint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Constraint"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -265,7 +313,8 @@
         "verifiable",
         "source_refs",
         "ambiguity",
-        "related_condition_keys"
+        "related_condition_keys",
+        "constraint"
       ]
     },
     "Requirement": {
@@ -334,6 +383,12 @@
             "minLength": 1
           },
           "minItems": 0
+        },
+        "source_markers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceMarker"
+          }
         }
       },
       "required": [
@@ -349,7 +404,8 @@
         "origin",
         "source_refs",
         "conditions",
-        "review_reasons"
+        "review_reasons",
+        "source_markers"
       ]
     },
     "Warning": {
@@ -377,6 +433,75 @@
         "code",
         "message",
         "block_ids"
+      ]
+    },
+    "SourceMarker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "block_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "section": {
+          "enum": [
+            "description",
+            "action",
+            "annotation",
+            "table",
+            "paragraph"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "block_id",
+        "section",
+        "label"
+      ]
+    },
+    "Constraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator": {
+          "enum": [
+            "le",
+            "lt",
+            "ge",
+            "gt",
+            "eq"
+          ]
+        },
+        "value": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unit_definition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "field",
+        "operator",
+        "value",
+        "unit",
+        "unit_definition"
       ]
     }
   }

@@ -1,20 +1,20 @@
 # 기획서 파싱 담당 전달용 출력 계약
 
-문서 버전: 2.2 · 요구사항 추출 계약: 2.1 · 갱신일: 2026-10-10
+문서 버전: 2.3 · 요구사항 추출 계약: 2.2 · 갱신일: 2026-10-10
 
 담당: 팀원 1(기획서 파싱·요구사항 구조화). [모델 개발 담당 명세](MODEL_TEAM_GUIDE.md) 2절을 구체화한 문서다. **목표 계약이며 현재 파서·저장 모델·API에 구현된 형식은 아니다.** 기존 평면 출력은 명시적으로 변환하며 기존 결과에 새 버전 번호만 붙이지 않는다.
 
 ## 1. 요구하는 결과 형태
 
-**주제 → 소주제 → 요구사항 → 원자 수락조건**으로 반환한다.
+**주제 → 소주제 → 요구사항 → 원자 수락조건**으로 반환한다. 실제 PDF 기준으로 공지사항 작성의 기본 화면(NOTICE-002)과 등록 취소 팝업(NOTICE-003)을 같은 소주제 아래 연결한다.
 
 ```text
 공지사항                       ← 주제: 기능 영역
 └─ 공지사항 작성                ← 소주제: 사용자가 수행하는 기능
    ├─ 첨부 파일 크기 제한       ← 요구사항: 한 가지 업무 규칙
-   │  └─ 최대 300MB 제한        ← 수락조건: 코드로 판정할 단위
-   └─ 제목 필수 입력
-      └─ 제목 입력이 필수이다
+   │  └─ 최대 50MB 제한        ← 수락조건: 코드로 판정할 단위
+   └─ 제목 입력 제한
+      └─ 50자 초과 입력을 막는다
 ```
 
 문서에 해당 기능이 있으면 `공지사항 → 공지사항 조회`, `회원가입 → 회원가입 신청` 같은 다른 소주제도 만든다. 예시에 있다는 이유로 문서에 없는 기능을 추가하지 않는다. 주제·소주제·요구사항·조건 개수는 고정하지 않는다.
@@ -25,8 +25,8 @@
 
 | 단계 | 반환물 | 파일 |
 |---|---|---|
-| 문서 파싱 | DocumentArtifact 2.0: 원문 블록·읽기 순서·위치·경고 | [문서 블록 예시](examples/document-artifact.json) |
-| 의미 추출 | RequirementExtractionDraft 2.1: 주제·소주제·화면·요구사항·조건·출처 | [정상 추출 예시](examples/requirement-extraction.json) |
+| 문서 파싱 | DocumentArtifact 2.1: 원문 블록·읽기 순서·위치·경고 | [문서 블록 예시](examples/document-artifact.json) |
+| 의미 추출 | RequirementExtractionDraft 2.2: 주제·소주제·화면·요구사항·조건·출처 | [정상 추출 예시](examples/requirement-extraction.json) |
 | 형식 검사 | Draft 2020-12 JSON Schema | [추출 스키마](schemas/requirement-extraction.schema.json) |
 | 내용 없음 | 빈 배열 + NO_REQUIREMENTS 경고 | [빈 결과 예시](examples/requirement-extraction-empty.json) |
 | 소속 불명 | 미분류 그룹 + 검토 사유, 요구사항 원문은 보존 | [미분류 예시](examples/requirement-extraction-unclassified.json) |
@@ -35,25 +35,37 @@
 
 파싱은 `parse_document(document_id, document_revision, file) → DocumentArtifact`, 의미 추출은 `extract_requirements(artifact, model_config) → RequirementExtractionDraft` 형태의 호출 어댑터로 연결한다. 함수명은 어댑터 예시다. 모델 팀이 사용자용 HTTP API·DB 저장까지 중복 개발할 필요는 없다.
 
-반환값은 JSON 객체 한 개다. JSON 앞뒤의 설명·Markdown·코드 펜스·API 키·코드 구현 판정은 넣지 않는다. DocumentArtifact의 예시 해시는 축약 표기이며 실제로는 원본 SHA-256을 계산한다. unread_locations·파서 오류 처리 등은 모델 담당 명세 2.2절을 따른다.
+현재 정상 예시는 실제 PDF의 5·9·10쪽 일부 발췌를 사람이 확인해 구조화한 것으로 전체 15쪽 자동 파싱 완료 결과는 아니다. PDF 발췌 예시와 별도로, 제목 없는 입력·빈 출력 예시는 오류 처리 계약을 확인하는 합성 자료다.
+
+반환값은 JSON 객체 한 개다. JSON 앞뒤의 설명·Markdown·코드 펜스·API 키·코드 구현 판정은 넣지 않는다. 정상 DocumentArtifact에는 실제 원본 SHA-256을 기록했다. 합성 미분류 자료의 해시는 설명용 축약 값이다. unread_locations·파서 오류 처리 등은 모델 담당 명세 2.2절을 따른다.
 
 ## 3. 추출 결과 필드
 
 | 필드 | 의미·필수 규칙 |
 |---|---|
-| contract_version | 문자열 `2.1`. 요구사항 추출과 팀원 2 인계에 적용 |
+| contract_version | 문자열 `2.2`. 요구사항 추출과 팀원 2 인계에 적용 |
 | document_id / document_revision | 서버가 준 값 그대로 반환. 다른 문서·개정의 블록을 섞지 않음 |
 | topics[] | 기능 영역. 각 주제는 key·title·title_origin·source_refs·review_reasons·subtopics[] |
 | topics[].subtopics[] | 주제 아래 기능. key·title·title_origin·source_refs·review_reasons·screen_keys[] |
-| screens[] | 별도 화면 정보. screen_key·title·source_block_ids[] |
+| screens[] | 별도 화면 정보. screen_key·title·source_title·source_screen_id·depth_path·view_type·base_screen_key·source_block_ids[] |
 | requirements[] | 평면 배열로 한 번만 정의하고 subtopic_key로 계층에 연결 |
 | warnings[] | `{code,message,block_ids}` 배열. 경고 없으면 `[]` |
 
 계층 이름을 요구사항마다 복제하지 않는다. 예: `topics[0].title = "공지사항"`, `topics[0].subtopics[0].title = "공지사항 작성"`, 해당 요구사항은 `subtopic_key = "NOTICE-CREATE"`로 연결한다. UI는 이 관계를 따라 트리·경로를 구성한다.
 
-요구사항 하나에 반드시 소주제 하나를 지정한다. `stable_key, subtopic_key, screen_key, title, original_text, condition, action, expected, req_type, origin, source_refs, conditions, review_reasons`를 모두 반환한다. 화면이 확인되지 않거나 적용되지 않으면 screen_key는 null이다. 조건·행동·기대 결과를 원문에서 확인할 수 없으면 해당 문자열은 비워두고 review_reasons에 사유를 남긴다. 검토 편의를 위한 제목을 붙여도 업무 규칙을 추가하지 않는다.
+요구사항 하나에 반드시 소주제 하나를 지정한다. `stable_key, subtopic_key, screen_key, title, original_text, source_markers, condition, action, expected, req_type, origin, source_refs, conditions, review_reasons`를 모두 반환한다. 화면이 확인되지 않거나 적용되지 않으면 screen_key는 null이다. 조건·행동·기대 결과를 원문에서 확인할 수 없으면 해당 문자열은 비워두고 review_reasons에 사유를 남긴다. 검토 편의를 위한 제목을 붙여도 업무 규칙을 추가하지 않는다.
 
-수락조건 하나는 `stable_key, text, category, target, verifiable, source_refs, ambiguity, related_condition_keys`를 모두 반환한다. enum은 스키마·모델 담당 명세를 따른다. 한 요구사항의 conditions는 1개 이상이며 독립적으로 판정할 수 있는 규칙 단위로 나눈다. 의미 추출 결과의 origin은 extracted만 허용한다. 사용자 수동 추가는 별도 API 계약이다.
+수락조건 하나는 `stable_key, text, category, target, verifiable, source_refs, constraint, ambiguity, related_condition_keys`를 모두 반환한다. enum은 스키마·모델 담당 명세를 따른다. 한 요구사항의 conditions는 1개 이상이며 독립적으로 판정할 수 있는 규칙 단위로 나눈다. 의미 추출 결과의 origin은 extracted만 허용한다. 사용자 수동 추가는 별도 API 계약이다.
+
+### 3.1 PDF 화면·표시 번호·상태 보존
+
+파서 블록에 `structure:{section,label,parent_block_id,reading_order}`를 제공한다. section은 header/description/action/annotation/table/paragraph, label은 원문의 0·1·7·A·B 등이며 없는 경우 null이다. 문서의 읽기 순서와 중첩 항목은 좌표·부모 블록으로 연결한다. 요구사항 source_markers는 실제 블록의 section/label을 참조하며 내부 stable_key와 원문 표시 번호를 분리한다.
+
+화면 source_screen_id는 원문 번호이고 screen_key는 연결용 후보 키다. source_title·depth_path는 원문 표기를 보존한다. view_type은 page/error_state/dialog/unknown이며, 확인 가능한 경우 base_screen_key로 기본 화면과 팝업·오류 상태를 연결한다. PDF 9쪽 NOTICE-002와 10쪽 NOTICE-003은 별도 원문 화면 ID지만 둘 다 `공지사항 작성` 소주제에 속한다. 오류 예시가 원문 ID를 반복해도 화면 상태 후보 키는 구분한다.
+
+일부 PDF 상단의 Depth·화면 ID·작성자는 일반 텍스트 추출에서 누락되므로 렌더링/OCR 확인이 필요하다. extraction_method=text/ocr이며 사람이 확인해 전사한 참조 예시는 manual_transcription으로 표시한다. 실제 자동 파서가 검토 없이 이 값을 사용하지 않는다. 블록의 원문 text와 읽기 편의를 위한 정규화 텍스트는 별도로 유지하고 quote 검증은 원문 text 기준이다.
+
+constraint는 수치 규칙이 있는 조건의 `{field,operator,value,unit,unit_definition}`이며 없으면 null이다. 연산자는 le/lt/ge/gt/eq다. PDF의 50MB 이하는 le/50/MB로 표현한다. 포함 경계는 명시돼 있으므로 모호하다고 바꾸지 않고 MB 바이트 정의만 미확정으로 남긴다. 오류 메시지 조건은 원문 문구·발생 상황을 함께 보존한다.
 
 ## 4. 제목·출처·검토 규칙
 
@@ -77,7 +89,8 @@ JSON Schema 통과만으로 내용이 유효한 것은 아니다. 저장 전에 
 4. 요구사항에 screen_key가 있으면 해당 소주제의 screen_keys에도 있어야 함. 화면이 없는 경우 null과 빈 screen_keys를 허용함.
 5. extracted/inferred 그룹에는 1개 이상 유효한 출처가 있음. inferred/unclassified에는 검토 사유가 있고 해당 요구사항도 검토 대상으로 분류됨.
 6. 불필요한 빈 그룹·중복 기능을 생성하지 않음. 요구사항이 없으면 topics·screens·requirements를 모두 빈 배열로 반환하고 NO_REQUIREMENTS 경고를 남김. 파싱 실패를 이 빈 결과로 바꾸지 않음.
-7. 숫자·단위·원문 규칙 보존 여부. 이는 스키마로 자동 보장되지 않으므로 골든셋·원문 대조로 검증함.
+7. source_markers가 실제 참조 블록의 section/label과 일치하고 base_screen_key가 존재하며 순환 관계가 없음. 원문 화면 ID를 다른 객체 ID와 혼용하지 않음.
+8. 숫자·단위·연산자·원문 규칙 보존 여부. 이는 스키마로 자동 보장되지 않으므로 골든셋·원문 대조로 검증함.
 
 검증 실패 결과는 저장 승인하지 않는다. 재시도 한도 내에서 수정 요청하거나 작업 오류로 반환한다. 파싱 실패·미지원 포맷·모델 호출 실패는 어댑터에서 별도 오류로 알리고 기존 저장 결과를 덮어쓰지 않는다.
 
@@ -89,7 +102,7 @@ JSON Schema 통과만으로 내용이 유효한 것은 아니다. 저장 전에 
 
 ```json
 {
-  "contract_version": "2.1",
+  "contract_version": "2.2",
   "topics": [
     {
       "id": "topic-001",
@@ -105,7 +118,7 @@ JSON Schema 통과만으로 내용이 유효한 것은 아니다. 저장 전에 
 }
 ```
 
-팀원 2는 이 소속을 분석 맥락으로 사용하고 개별 수락조건을 코드 근거로 판정한다. 기획서를 다시 읽어 주제·요구사항을 조용히 바꾸지 않는다. 판정·시험 생성 출력 계약 2.0과 DocumentArtifact 2.0은 유지하며 이 문서의 추출·인계 계약 2.1과 구분한다.
+팀원 2는 이 소속을 분석 맥락으로 사용하고 개별 수락조건을 코드 근거로 판정한다. 기획서를 다시 읽어 주제·요구사항을 조용히 바꾸지 않는다. 판정·시험 생성 계약 2.0, DocumentArtifact 2.1과 이 문서의 추출·인계 계약 2.2를 구분한다. 단계별 시험 출력 계약은 별도 후속 변경이다.
 
 ## 7. 팀원 1에게 요청할 전달물
 
