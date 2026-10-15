@@ -98,7 +98,7 @@
           "stable_key": "NOTICE-002-1-C1",
           "text": "제목은 50자까지 입력할 수 있다.",
           "category": "validation",
-          "target": "frontend",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
@@ -120,7 +120,7 @@
           "stable_key": "NOTICE-002-1-C2",
           "text": "제목 50자 초과 입력을 막는다.",
           "category": "validation",
-          "target": "frontend",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
@@ -135,8 +135,8 @@
         {
           "stable_key": "NOTICE-002-1-C3",
           "text": "제목 입력창 오른쪽 아래에 입력한 글자 수를 표시한다.",
-          "category": "business_logic",
-          "target": "frontend",
+          "category": "display",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
@@ -144,7 +144,6 @@
               "quote": "공지사항의제목을 작성하며, 제목은 50자까지 입력할 수있다. 50자가넘어가면입력을 할수없으며, 입력창의오른쪽 아래입\n력한글자수가표시된다."
             }
           ],
-          "constraint": null,
           "ambiguity": "",
           "related_condition_keys": []
         }
@@ -182,7 +181,7 @@
           "stable_key": "NOTICE-002-7-C1",
           "text": "첨부 파일은 하나만 업로드할 수 있다.",
           "category": "validation",
-          "target": "frontend",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
@@ -204,7 +203,7 @@
           "stable_key": "NOTICE-002-7-C2",
           "text": "첨부 파일 크기는 50MB 이하만 허용한다.",
           "category": "validation",
-          "target": "frontend",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
@@ -225,8 +224,8 @@
         {
           "stable_key": "NOTICE-002-7-C3",
           "text": "업로드한 파일명을 첨부 입력창 안에 표시한다.",
-          "category": "business_logic",
-          "target": "frontend",
+          "category": "display",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
@@ -234,7 +233,6 @@
               "quote": "공지사항에포함되는첨부파일이저장되며, 첨부파일은하나만 업로드 가능하다. 첨부파일을업로드하게되면입력창 안에첨부\n파일의 이름이 넣어지며넣은첨부파일은창안에 x버튼으로삭제할 수있다.\n(1) 첨부파일은50MB이하의 파일만 업로드 가능하며, 50MB초과일 시, 다음과 같이에러메시지가표시된다.\n* error-msg: 첨부파일의크기는 50MB이하만 가능합니다."
             }
           ],
-          "constraint": null,
           "ambiguity": "",
           "related_condition_keys": []
         },
@@ -242,7 +240,7 @@
           "stable_key": "NOTICE-002-7-C4",
           "text": "첨부 입력창 안의 x 버튼으로 첨부 파일을 삭제할 수 있다.",
           "category": "business_logic",
-          "target": "frontend",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
@@ -257,8 +255,8 @@
         {
           "stable_key": "NOTICE-002-7-C5",
           "text": "50MB 초과 파일 선택 시 크기 제한 오류 메시지를 표시한다.",
-          "category": "error_message",
-          "target": "frontend",
+          "category": "validation",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
@@ -304,7 +302,7 @@
           "stable_key": "NOTICE-003-A-C1",
           "text": "아니오를 클릭하면 팝업을 닫고 신규등록 화면으로 돌아간다.",
           "category": "navigation",
-          "target": "frontend",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
@@ -348,7 +346,7 @@
           "stable_key": "NOTICE-003-B-C1",
           "text": "네를 클릭하면 등록 내용을 취소하고 공지사항 목록으로 이동한다.",
           "category": "navigation",
-          "target": "frontend",
+          "target": "unknown",
           "verifiable": "code",
           "source_refs": [
             {
