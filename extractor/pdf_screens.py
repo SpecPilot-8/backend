@@ -21,17 +21,9 @@ import pymupdf
 import pytesseract
 from PIL import Image
 
-# 이 문서 템플릿에서 헤더 행의 각 값 셀 좌표 (pt 단위, 문서 전 페이지 공통)
-HEADER_ROW_Y = (24.1, 37.8)
-HEADER_CELLS = {
-    "depth": (24.1, 193.3),
-    "screen_name": (213.5, 489.2),
-    "screen_id": (510.8, 605.2),
-    "author": (624.6, 720.4),
-}
-
-# 우측 컬럼(Description / Action-Event 표)의 x 시작 좌표
-RIGHT_COLUMN_X0 = 489.0
+# 헤더 라벨 → 필드 이름. 라벨은 페이지마다 실제 텍스트로 들어 있어서(값은 도형일 수 있다)
+# 라벨 위치로 값 칸을 찾는다. 좌표를 고정하면 레이아웃이 조금만 달라도 엉뚱한 곳을 OCR한다.
+HEADER_LABELS = {"Depth": "depth", "화면명": "screen_name", "화면ID": "screen_id", "작성자": "author"}
 
 ROW_INDEX_RE = re.compile(r"^([0-9]+|[A-Z])\s*\n?")
 
@@ -43,9 +35,59 @@ SCREEN_ID_RE = re.compile(r"^[A-Z]{2,12}-\d{3}$")
 OCR_CONFIDENCE_FLOOR = 0.5
 
 
-def _ocr_cell(page: pymupdf.Page, x0: float, x1: float, lang: str = "kor+eng") -> tuple[str, float]:
+@dataclass
+class Layout:
+    header_cells: dict[str, pymupdf.Rect]  # 필드 이름 → 값 칸
+    right_x0: float | None                  # 우측 컬럼(Description / Action-Event 표)의 x 시작
+    reasons: list[str]                      # 감지 실패·대체 사유 (검수 큐로 올린다)
+
+
+def detect_layout(page: pymupdf.Page) -> Layout:
+    """헤더 값 칸과 우측 표 컬럼 위치를 페이지에서 찾는다.
+
+    - 값 칸: 라벨이 든 칸 바로 오른쪽에 붙은 칸(도형 사각형). 사각형이 없으면 라벨 끝 ~ 다음 라벨 시작.
+    - 우측 컬럼: 헤더 바로 아래에서 페이지 오른쪽 끝까지 이어지는 사각형(표 제목 바) 중 가장 위.
+    """
+    w, h = page.rect.width, page.rect.height
+    reasons: list[str] = []
+
+    labels = sorted(
+        (wd for wd in page.get_text("words") if wd[4] in HEADER_LABELS and wd[1] < h * 0.15),
+        key=lambda wd: wd[0],
+    )
+    found = {wd[4] for wd in labels}
+    for name in HEADER_LABELS:
+        if name not in found:
+            reasons.append(f"헤더 라벨 '{name}'을 찾지 못함")
+
+    rects = [d["rect"] for d in page.get_drawings() if d["rect"].y1 < h * 0.2 and d["rect"].height > 5]
+    cells: dict[str, pymupdf.Rect] = {}
+    for i, wd in enumerate(labels):
+        label = pymupdf.Rect(wd[:4])
+        holders = [r for r in rects if r.contains(label)]
+        value = None
+        if holders:
+            holder = min(holders, key=lambda r: r.width)
+            beside = [r for r in rects if abs(r.x0 - holder.x1) < 1.5 and abs(r.y0 - holder.y0) < 1.5]
+            if beside:
+                value = max(beside, key=lambda r: r.width)
+        if value is None:
+            x1 = labels[i + 1][0] - 2 if i + 1 < len(labels) else w
+            value = pymupdf.Rect(label.x1 + 2, label.y0 - 3, x1, label.y1 + 3)
+            reasons.append(f"{HEADER_LABELS[wd[4]]} 값 칸 테두리가 없어 라벨 위치로 추정")
+        cells[HEADER_LABELS[wd[4]]] = value
+
+    header_bottom = max((r.y1 for r in cells.values()), default=0.0)
+    panels = [r for r in rects if r.x1 > w * 0.95 and r.x0 > w * 0.4 and header_bottom - 1 <= r.y0 < h * 0.2]
+    right_x0 = min(panels, key=lambda r: r.y0).x0 if panels else None
+    if right_x0 is None:
+        reasons.append("우측 표 컬럼 위치를 찾지 못함")
+
+    return Layout(cells, right_x0, reasons)
+
+
+def _ocr_cell(page: pymupdf.Page, rect: pymupdf.Rect, lang: str = "kor+eng") -> tuple[str, float]:
     """셀 영역을 크롭해 OCR. (텍스트, 0~100 신뢰도) 반환."""
-    rect = pymupdf.Rect(x0, HEADER_ROW_Y[0], x1, HEADER_ROW_Y[1])
     pix = page.get_pixmap(clip=rect, matrix=pymupdf.Matrix(12, 12))
     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
     data = pytesseract.image_to_data(
@@ -58,32 +100,33 @@ def _ocr_cell(page: pymupdf.Page, x0: float, x1: float, lang: str = "kor+eng") -
     return text, conf
 
 
-def extract_header(page: pymupdf.Page) -> dict:
+def extract_header(page: pymupdf.Page, layout: Layout | None = None) -> dict:
     """헤더 바(Depth/화면명/화면ID/작성자)를 추출. 직접 텍스트가 비면 OCR로 폴백."""
+    layout = layout or detect_layout(page)
     # 헤더 행 y범위로 타이트하게 clip하면 PyMuPDF가 그 줄 전체를 한 블록으로
-    # 합쳐버린다. 클립 없이 페이지 전체에서 블록을 뽑은 뒤 y로 필터링한다.
+    # 합쳐버린다. 클립 없이 페이지 전체에서 블록을 뽑은 뒤 칸 영역으로 필터링한다.
     all_blocks = page.get_text("blocks")
-    y0, y1 = HEADER_ROW_Y
-    direct_blocks = [
-        b for b in all_blocks
-        if b[1] >= y0 - 1 and b[3] <= y1 + 1
-    ]
 
     result: dict[str, dict] = {}
-    for field_name, (x0, x1) in HEADER_CELLS.items():
+    for field_name in HEADER_LABELS.values():
+        cell = layout.header_cells.get(field_name)
+        if cell is None:
+            result[field_name] = {"value": "", "source": "ocr", "confidence": 0.0}
+            continue
         direct_text = ""
-        for b in direct_blocks:
+        for b in all_blocks:
             bx0, by0, bx1, by1, text, *_ = b
             # 블록이 셀 안에 완전히 들어와야 함 (라벨 행처럼 전체 폭을 가로지르는
             # 블록이 중점만 맞아 잘못 매칭되는 것을 방지)
-            if bx0 >= x0 - 2 and bx1 <= x1 + 2 and text.strip():
+            if (bx0 >= cell.x0 - 2 and bx1 <= cell.x1 + 2 and by0 >= cell.y0 - 1 and by1 <= cell.y1 + 1
+                    and text.strip()):
                 direct_text = text.strip()
                 break
 
         if direct_text:
             result[field_name] = {"value": direct_text, "source": "text", "confidence": 1.0}
         else:
-            ocr_text, ocr_conf = _ocr_cell(page, x0, x1)
+            ocr_text, ocr_conf = _ocr_cell(page, cell)
             result[field_name] = {
                 "value": ocr_text,
                 "source": "ocr",
@@ -100,14 +143,14 @@ class Row:
     bbox: tuple[float, float, float, float]
 
 
-def _extract_rows(page: pymupdf.Page, y0: float, y1: float) -> list[Row]:
+def _extract_rows(page: pymupdf.Page, x0_col: float, y0: float, y1: float) -> list[Row]:
     """우측 컬럼의 한 표(Description 또는 Action/Event) 영역에서 행을 추출.
 
     각 행은 '번호/문자 + 본문'으로 시작하는 블록 하나 이상으로 구성된다.
     이어지는 블록(들여쓰기된 상세 설명, error-msg 등)은 번호가 없으므로
     직전 행에 이어 붙인다.
     """
-    clip = pymupdf.Rect(RIGHT_COLUMN_X0, y0, 720, y1)
+    clip = pymupdf.Rect(x0_col, y0, page.rect.x1, y1)
     blocks = page.get_text("blocks", clip=clip)
     blocks = [b for b in blocks if b[4].strip()]
     blocks.sort(key=lambda b: (b[1], b[0]))  # y, then x
@@ -117,10 +160,10 @@ def _extract_rows(page: pymupdf.Page, y0: float, y1: float) -> list[Row]:
         x0, by0, x1, by1, text, *_ = b
         text = text.strip()
         m = ROW_INDEX_RE.match(text)
-        # 행 시작 블록은 인덱스 배지 칸(x ≈ RIGHT_COLUMN_X0+5)에 딱 붙어 시작한다.
+        # 행 시작 블록은 인덱스 배지 칸(x ≈ 컬럼 시작+5)에 딱 붙어 시작한다.
         # "(1)", "1)" 같은 본문 안 하위 번호는 더 안쪽(x ≈ +20 이상)에서 시작하므로
         # 좁은 임계값으로 걸러내야 오인식하지 않는다.
-        if m and x0 < RIGHT_COLUMN_X0 + 10:
+        if m and x0 < x0_col + 10:
             idx = m.group(1)
             body = text[m.end():].strip()
             rows.append(Row(idx=idx, text=body, bbox=(x0, by0, x1, by1)))
@@ -133,25 +176,28 @@ def _extract_rows(page: pymupdf.Page, y0: float, y1: float) -> list[Row]:
 
 
 def parse_screen(page: pymupdf.Page) -> dict | None:
-    header = extract_header(page)
+    layout = detect_layout(page)
+    header = extract_header(page, layout)
     page_bottom = page.rect.y1
+    header_bottom = max((r.y1 for r in layout.header_cells.values()), default=page.rect.y0)
 
     # 이 문서에서는 "Action/Event" 표 제목 자체가 텍스트가 아니라 도형으로
     # 렌더링되어 있어 위치로 경계를 찾을 수 없다. 대신 인덱스 라벨의 타입으로
     # 구분한다: Description은 숫자(0,1,2..), Action/Event는 알파벳(A,B,C..).
-    all_rows = _extract_rows(page, HEADER_ROW_Y[1], page_bottom)
+    all_rows = [] if layout.right_x0 is None else _extract_rows(page, layout.right_x0, header_bottom, page_bottom)
     description_rows = [r for r in all_rows if r.idx.isdigit()]
     action_rows = [r for r in all_rows if not r.idx.isdigit()]
 
-    if not description_rows and not action_rows:
-        # 상태 변형(에러 상태 등) 페이지 — 표 내용이 비어 있어 별도 화면으로 취급하지 않음
+    if not description_rows and not action_rows and layout.right_x0 is not None:
+        # 상태 변형(에러 상태 등) 페이지 — 표 내용이 비어 있어 별도 화면으로 취급하지 않음.
+        # 표 컬럼 자체를 못 찾은 경우는 빈 페이지와 구분해야 하므로 화면으로 남겨 검수에 올린다.
         return None
 
     screen_id = header["screen_id"]["value"] or f"UNKNOWN-p{page.number}"
 
     # 원칙3: 의심스러운 것만 사람 검수 큐에 올린다. 자동으로 교정하지 않는다 —
     # OCR 오독을 조용히 고치면 틀린 값이 맞는 값처럼 보이기 때문이다.
-    review_reasons = []
+    review_reasons = list(layout.reasons)
     if not SCREEN_ID_RE.match(screen_id):
         review_reasons.append(f"screen_id 형식 불일치: {screen_id!r}")
     for name, info in header.items():
