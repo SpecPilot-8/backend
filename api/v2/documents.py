@@ -43,8 +43,9 @@ class ConditionWrite(Input):
     id: str | None = None
     stable_key: str = Field(min_length=1, max_length=200)
     text: str = Field(min_length=1, max_length=10000)
-    category: Literal['validation', 'navigation', 'business_logic', 'data', 'error_message']
-    target: Literal['frontend', 'backend', 'both', 'unknown']
+    category: Literal['display', 'validation', 'navigation', 'business_logic', 'data', 'error_message']
+    target: Literal['frontend', 'backend', 'both', 'unknown'] = Field(
+        description='원문에 명시된 구현 위치. 언급이 없으면 unknown이며 근거 후보 필터로 사용하지 않습니다')
     verifiable: Literal['code', 'not_statically_verifiable']
     source_refs: list[SourceRef] = Field(default_factory=list)
     constraint: Constraint | None = None
@@ -412,7 +413,9 @@ def ingest_extraction(db, p, d, draft):
         converted = []
         for c in r['conditions']:
             converted.append({**{k: v for k, v in c.items() if k != 'related_condition_keys'},
-                              'id': conditions[c['stable_key']], 'related_condition_ids': [conditions[k] for k in c['related_condition_keys']]})
+                              'id': conditions[c['stable_key']],
+                              'ambiguity': [c['ambiguity']] if c['ambiguity'] else [],
+                              'related_condition_ids': [conditions[k] for k in c['related_condition_keys']]})
         needs = r['review_reasons'] or any(c['ambiguity'] for c in r['conditions'])
         data = {**common, **{k: v for k, v in r.items() if k not in ('subtopic_key', 'screen_key', 'conditions')},
                 'subtopic_id': subs[r['subtopic_key']], 'screen_id': screens.get(r['screen_key']),

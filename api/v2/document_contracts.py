@@ -74,6 +74,10 @@ def validate_extraction(draft, artifact):
         walk(draft)
         if not rkeys:
             require(not draft['topics'] and not draft['screens'] and any(w['code'] == 'NO_REQUIREMENTS' for w in draft['warnings']))
-        return deepcopy(draft)
+        normalized = deepcopy(draft)
+        for requirement in normalized['requirements']:
+            for condition in requirement['conditions']:
+                condition.setdefault('constraint', None)
+        return normalized
     except (ValueError, KeyError, TypeError):
         raise APIError(422, 'MODEL_OUTPUT_INVALID', '모델의 구조·출처·키·화면 관계를 확인하세요') from None
