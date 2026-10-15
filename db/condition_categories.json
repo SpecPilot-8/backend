@@ -1,0 +1,1202 @@
+[
+ {
+  "requirement": "LOGIN-001-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-0",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-1",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-1",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-2",
+  "seq": 1,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "LOGIN-001-2",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-001-2",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-001-3",
+  "seq": 1,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "LOGIN-001-3",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-3",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-3",
+  "seq": 4,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-3",
+  "seq": 5,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-001-3",
+  "seq": 6,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-001-3",
+  "seq": 7,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-001-3",
+  "seq": 8,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-001-4",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-001-A",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "LOGIN-001-B",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "LOGIN-001-C",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-C",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-C",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-001-D",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "LOGIN-001-E",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-001-E",
+  "seq": 2,
+  "category": "error_message"
+ },
+ {
+  "requirement": "LOGIN-001-F",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "LOGIN-002-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-0",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-0",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-0",
+  "seq": 4,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-1",
+  "seq": 1,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "LOGIN-002-1",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-002-1",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-002-2",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-002-2",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-002-2",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-002-2",
+  "seq": 4,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-002-2",
+  "seq": 5,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-3",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-002-3",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-002-3",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-4",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-5",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-002-A",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-A",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-A",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-B",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-002-C",
+  "seq": 1,
+  "category": "error_message"
+ },
+ {
+  "requirement": "LOGIN-002-D",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "LOGIN-003-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-003-1",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-003-1",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-003-2",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-003-3",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-003-A",
+  "seq": 1,
+  "category": "error_message"
+ },
+ {
+  "requirement": "LOGIN-003-A",
+  "seq": 2,
+  "category": "error_message"
+ },
+ {
+  "requirement": "LOGIN-003-B",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "LOGIN-004-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-004-0",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-004-1",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-004-1",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-004-1",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-004-1",
+  "seq": 4,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-004-2",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-004-2",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-004-3",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "LOGIN-004-A",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-004-A",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-004-A",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "LOGIN-004-B",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "LOGIN-004-B",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "LOGIN-004-C",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "MYPAGE-001-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-0",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-0",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-1",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-1",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-10",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-10",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-11",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-11",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-11",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-11",
+  "seq": 4,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-11",
+  "seq": 5,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-12",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-12",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-12",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-13",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-2",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-2",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-3",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-3",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-4",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-4",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-5",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-5",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-5",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-6",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-7",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-8",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-9",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-9",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-9",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "MYPAGE-001-A",
+  "seq": 1,
+  "category": "data"
+ },
+ {
+  "requirement": "MYPAGE-001-A",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "MYPAGE-001-B",
+  "seq": 1,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "MYPAGE-001-B",
+  "seq": 2,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "MYPAGE-001-B",
+  "seq": 3,
+  "category": "error_message"
+ },
+ {
+  "requirement": "MYPAGE-001-C",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-C",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-001-C",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-002-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-002-0",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-002-0",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "MYPAGE-002-A",
+  "seq": 1,
+  "category": "data"
+ },
+ {
+  "requirement": "MYPAGE-002-A",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "MYPAGE-002-B",
+  "seq": 1,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "MYPAGE-002-B",
+  "seq": 2,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "MYPAGE-002-B",
+  "seq": 3,
+  "category": "error_message"
+ },
+ {
+  "requirement": "MYPAGE-002-C",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "MYPAGE-002-C",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-001-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 1,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 2,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 3,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 4,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 5,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 6,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 7,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 8,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 9,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 10,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 11,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 12,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 13,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 14,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 15,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 16,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 17,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-1",
+  "seq": 18,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-2",
+  "seq": 1,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-2",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-2",
+  "seq": 3,
+  "category": "business_logic"
+ },
+ {
+  "requirement": "NOTICE-001-A",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-001-A",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-001-A",
+  "seq": 3,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-001-B",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-B",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-B",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-001-C",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-001-D",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-002-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-1",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-1",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-2",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-2",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-2",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-3",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-3",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-3",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-4",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-4",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-5",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-5",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-6",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-6",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-7",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-7",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-002-7",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-7",
+  "seq": 4,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-8",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-8",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-8",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-8",
+  "seq": 4,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-8",
+  "seq": 5,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-002-A",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-002-B",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-002-C",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-002-C",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-002-D",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-003-0",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-003-A",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-003-B",
+  "seq": 1,
+  "category": "data"
+ },
+ {
+  "requirement": "NOTICE-003-B",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-004-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-0",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-0",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-0",
+  "seq": 4,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-0",
+  "seq": 5,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-0",
+  "seq": 6,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-0",
+  "seq": 7,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-0",
+  "seq": 8,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-1",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-1",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-2",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-2",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-2",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-3",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-3",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-3",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-4",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-4",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-5",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-5",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-6",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-6",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-7",
+  "seq": 1,
+  "category": "data"
+ },
+ {
+  "requirement": "NOTICE-004-7",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-7",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-004-7",
+  "seq": 4,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-7",
+  "seq": 5,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-8",
+  "seq": 1,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-8",
+  "seq": 2,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-8",
+  "seq": 3,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-8",
+  "seq": 4,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-8",
+  "seq": 5,
+  "category": "validation"
+ },
+ {
+  "requirement": "NOTICE-004-A",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-004-B",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-004-C",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-004-C",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-004-D",
+  "seq": 1,
+  "category": "data"
+ },
+ {
+  "requirement": "NOTICE-004-D",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-004-E",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-005-0",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-005-A",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-005-B",
+  "seq": 1,
+  "category": "data"
+ },
+ {
+  "requirement": "NOTICE-005-B",
+  "seq": 2,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-006-0",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-006-1",
+  "seq": 1,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-006-1",
+  "seq": 2,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-006-1",
+  "seq": 3,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-006-1",
+  "seq": 4,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-006-1",
+  "seq": 5,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-006-1",
+  "seq": 6,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-006-1",
+  "seq": 7,
+  "category": "display"
+ },
+ {
+  "requirement": "NOTICE-006-A",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-006-B",
+  "seq": 1,
+  "category": "data"
+ },
+ {
+  "requirement": "NOTICE-006-C",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-006-D",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-006-E",
+  "seq": 1,
+  "category": "navigation"
+ },
+ {
+  "requirement": "NOTICE-006-F",
+  "seq": 1,
+  "category": "navigation"
+ }
+]

@@ -174,6 +174,10 @@ CREATE TABLE IF NOT EXISTS decompose_issue (
 -- 본문이 같은(공백 무시) 요구사항은 한 번만 분해하고 조건을 복사한다. 같은 문장이 화면마다
 -- 다르게 나뉘면 판정·골든셋 비교가 어긋나기 때문이다. 복사된 조건은 원본 요구사항을 가리킨다.
 ALTER TABLE requirement_condition ADD COLUMN IF NOT EXISTS copied_from_requirement_id BIGINT REFERENCES requirement(id) ON DELETE CASCADE;
+-- 조건 범주 (scripts/apply_categories.py). 결과 화면에서 요구사항별 "범주별 구현 수 / 조건 수" 요약에만 쓴다.
+-- 판정에는 쓰지 않는다. 표시 라벨(한국어)은 프론트가 정한다.
+ALTER TABLE requirement_condition ADD COLUMN IF NOT EXISTS category TEXT CHECK (category IN (
+    'display', 'validation', 'navigation', 'business_logic', 'data', 'error_message'));
 
 -- 판정 (docs/label-definition.md 잠정 결정 기준).
 -- 하위 조건마다 판정하고(Q0) 요구사항 단위 상태는 규칙으로 집계한다.
