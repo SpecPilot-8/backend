@@ -1,6 +1,6 @@
 # SpecPilot API 명세서
 
-버전: v2 계약 2.5 · 갱신일: 2026-10-11
+버전: v2 계약 2.6 · 갱신일: 2026-10-15
 
 관련 문서: [기능명세](FUNCTIONAL_SPEC.md), [모델 담당·내부 입출력](MODEL_TEAM_GUIDE.md).
 
@@ -71,7 +71,7 @@ JobOut: `id,project_id,operation,status,snapshot_id,model_config_snapshot,missin
 | `requirement.review_status` | pending / needs_review / approved |
 | `requirement.analysis_state` | not_run / running / completed / failed / blocked |
 | `topic.title_origin` / `subtopic.title_origin` | extracted / inferred / unclassified |
-| `condition.category` | validation / navigation / business_logic / data / error_message |
+| `condition.category` | display / validation / navigation / business_logic / data / error_message |
 | `condition.target` | frontend / backend / both / unknown |
 | `requirement.req_type` | functional / non_functional |
 | `condition.verifiable` | code / not_statically_verifiable |
@@ -94,7 +94,7 @@ UI 한국어 라벨은 기능명세를 따른다. 계약 데이터와 출력물�
 | Subtopic | id, topic_id, document_id, document_revision, key, title, title_origin, source_refs, review_reasons, screen_ids[] |
 | Screen | id, screen_key, title, source_title, source_screen_id(nullable), depth_path[], view_type, base_screen_id(nullable), source_block_ids |
 | Requirement | id, stable_key, subtopic_id, screen_id(nullable), title, original_text, source_markers[], condition, action, expected, req_type, revision, review_status, source_refs, conditions[] |
-| Condition | id, stable_key, text, category, target, verifiable, source_refs, constraint(nullable), ambiguity, related_condition_ids[] |
+| Condition | id, stable_key, text, category, target, verifiable, source_refs, constraint(선택·nullable), ambiguity, related_condition_ids[] |
 | Snapshot | id, project_id, content_hash, status, source_kind, file_count, chunk_count, warnings |
 | Chunk | id, snapshot_id, relative file_path, start_line, end_line, symbol, content |
 | VerificationRun | id, snapshot_id, requirement_versions[], model_config_snapshot, prompt_version, rules_version, status |
@@ -156,6 +156,10 @@ ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabiliti
 그룹 조회와 요구사항 목록은 같은 문서 revision을 지정해 사용한다. topic_id·subtopic_id·screen_id는 선택 문서 revision 소속을 검사하고 서로 충돌하는 필터 조합은 422로 거부한다. 주제·소주제의 제목만으로 다른 문서를 합치지 않는다. PATCH의 subtopic_id도 같은 문서 revision에서만 허용하고 새 요구사항 revision을 생성한다. 새 주제·소주제를 직접 생성·이름 변경하는 API는 후속 범위다. 수동 추가는 document_id/document_revision/title/author_reason/conditions를 받는다. origin은 manual이며 source_refs는 비울 수 있다. subtopic_id를 생략하면 서버가 해당 문서 revision의 미분류 그룹을 생성한다. 조건 쓰기는 stable_key/text/category/target/verifiable를 필수로 받으며 나머지 값은 기본값을 사용한다. 수정에서는 기존 조건 id를 함께 제출할 수 있고 새 revision에 새 조건 ID를 발급한다. 추적표 행은 `topic_id,subtopic_id,topic_title,subtopic_title`도 포함해 경로를 표시한다. 과거 실행에는 당시 그룹 경로를 보존하며 최신 문서의 이름으로 바꾸지 않는다.
 
 출처 인용은 원문 블록 텍스트와 일치해야 한다. 사용자 작성 추가 조건은 `origin:"manual"`, `source_refs:[]`와 작성 이유를 허용하지만 모델 추출 조건에 출처 생략을 허용하지 않는다.
+
+category에 display(화면 표시)를 포함한다. 입력 검사에 딸린 안내 문구는 validation, 로그인 실패/중복 이메일 등 업무 확인 결과 메시지는 error_message다. target은 원문 위치 언급이 없으면 unknown이며 코드 근거 후보의 사전 필터로 사용하지 않는다. 서버 검증은 판정의 server_validation으로 구분하고 화면 도달 범위 검사는 유지한다. display와 verifiable은 독립적이다.
+
+constraint는 수동 입력·모델 추출 모두 생략/null/유효한 객체를 허용하고 생략은 null로 저장한다. 원문 수치·단위·경계를 text/source_refs에 보존한다. 추출 계약 2.2의 ambiguity는 문자열이고 HTTP 조건 수정의 ambiguity는 문자열 배열이다. 내부 저장 시 빈 문자열은 [], 사유 문자열은 [사유]로 변환하므로 조회 후 수정에도 같은 형식을 사용한다. 모델 추출 스키마의 display 추가·constraint 선택화는 2.2 호환 확장이다.
 
 조건 ID는 요구사항 revision에 속한다. related_condition_ids는 같은 프로젝트·문서 개정의 과거 조건도 참조할 수 있으며 소유 요구사항이 수정되어도 기존 참조를 보존한다. 본인 개정의 조건끼리 연결한 ID는 새 개정 ID로 치환한다. 오래된 base_revision은 조건 내용 처리에 앞서 409 VERSION_CONFLICT로 알리고 저장 시에도 조건부 갱신으로 검사한다. GET 출처의 location은 서버가 조인한 읽기 전용 값이며 쓰기 요청의 source_refs에는 block_id·quote만 제출한다.
 

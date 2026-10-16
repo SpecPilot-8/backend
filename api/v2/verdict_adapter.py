@@ -50,6 +50,7 @@ def ingest_verdict(db, p, v, output, trusted_scopes, trusted_graph=None):
     run = resource(db, p, v, 'verification_run')
     req = next((r for r in run.data['requirements'] if r['id'] == draft.requirement_id), None)
     graph = deepcopy(trusted_graph or {'nodes': [], 'edges': [], 'unresolved': []})
+    # target은 원문 메타데이터다. 구현 계층과 무관하게 같은 스냅샷의 청크를 검증한다.
     chunks = {c.id: c for c in all_resources(db, p, 'chunk') if c.data['snapshot_id'] == run.data['snapshot_id']}
     def check(condition):
         if not condition:

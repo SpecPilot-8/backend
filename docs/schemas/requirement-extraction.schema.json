@@ -254,7 +254,9 @@
           "minLength": 1
         },
         "category": {
+          "description": "display는 화면 표시, validation은 입력 검사 및 그 안내, error_message는 로그인 실패·중복 이메일 등 업무 확인 결과 메시지입니다. 구현 위치와는 별개입니다.",
           "enum": [
+            "display",
             "validation",
             "navigation",
             "business_logic",
@@ -263,6 +265,7 @@
           ]
         },
         "target": {
+          "description": "원문에 구현 위치가 명시된 경우만 지정하고 없으면 unknown입니다. 근거 후보 필터로 사용하지 않습니다.",
           "enum": [
             "frontend",
             "backend",
@@ -271,6 +274,7 @@
           ]
         },
         "verifiable": {
+          "description": "category와 독립적으로 지정합니다. display도 코드로 확인 가능한 조건이면 code입니다.",
           "enum": [
             "code",
             "not_statically_verifiable"
@@ -295,6 +299,8 @@
           "uniqueItems": true
         },
         "constraint": {
+          "description": "선택 수치 메타데이터입니다. 생략 또는 null을 허용하며 값이 있으면 객체 계약을 검사합니다. 수치·단위·경계는 text와 원문 출처에 보존합니다.",
+          "default": null,
           "anyOf": [
             {
               "$ref": "#/$defs/Constraint"
@@ -313,8 +319,7 @@
         "verifiable",
         "source_refs",
         "ambiguity",
-        "related_condition_keys",
-        "constraint"
+        "related_condition_keys"
       ]
     },
     "Requirement": {

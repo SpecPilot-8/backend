@@ -1,6 +1,6 @@
 # 기획서 파싱 담당 개발·인계 체크리스트
 
-갱신일: 2026-10-10 · 연결 기준: 기능명세 2.4 / DocumentArtifact 2.1 / 요구사항 추출 2.2 / 시험 생성 2.1
+갱신일: 2026-10-15 · 연결 기준: 기능명세 2.6 / DocumentArtifact 2.1 / 요구사항 추출 2.2 (호환 확장) / 시험 생성 2.1
 
 **팀원 1에게 이 문서를 먼저 전달한다.** 필드 정의는 [파싱 출력 계약](PARSER_OUTPUT_SPEC.md), 서비스 기능은 [기능명세](FUNCTIONAL_SPEC.md), 코드 분석·시험 생성 담당은 [모델 담당 명세](MODEL_TEAM_GUIDE.md), Excel 매핑은 [테스트 출력 계약](TEST_OUTPUT_SPEC.md)을 따른다.
 
@@ -50,8 +50,9 @@
 | 기능 영역·소주제·화면명·원문 화면 ID·팝업/오류 상태 | topics[].subtopics[], screens[], requirements[].subtopic_key/screen_key | **F03** 주제별 목록·선택 경로, **F04·F05** 화면 범위 매칭의 명세 맥락, **F07·F09** 시험 분류/Excel DEPTH | 팀원 2가 코드 진입점과 실제 관계를 분석 |
 | 업무 규칙·발생 전제·사용자 동작·기대 동작 | requirements[].title/original_text/condition/action/expected/source_markers | **F03** 요구사항 상세·편집, **F05** 명세 대 코드 비교, **F07** 시험 전제/절차/기대 결과의 기준 | 사용자 검토 후 팀원 2에 인계 |
 | 복합 문장의 개별 규칙·각 조건의 분류 | conditions[].text/category/target/verifiable | **F03** 수락조건 검토·분류, **F05** 조건별 판정·요구사항 집계, **F06** 문제와 조건 연결, **F07** 조건별 시험 커버리지 | 팀원 2가 조건별 판정/시험 생성 |
-| 길이·크기·개수·날짜 순서·허용 값·분기 | 조건 text와 constraint(field/operator/value/unit/unit_definition), 원문 source_refs | **F05** 값/연산자 차이 검증, **F07** 정상·오류·경계 시험 생성 | 숫자 비교는 constraint, 날짜·조합·복수 허용 값은 현재 계약의 text로 보존 |
-| 오류 발생 조건·문구·발생 시점 | requirement.condition/action, error_message 조건 text/source_refs | **F03** 오류 조건 검토, **F05** 처리/문구 비교, **F07** 오류 시험의 단계 expected | 팀원 2가 코드 근거·문구 일치 정보 추가 |
+| 길이·크기·개수·날짜 순서·허용 값·분기 | 조건 text와 선택 constraint(field/operator/value/unit/unit_definition), 원문 source_refs | **F05** 값/연산자 차이 검증, **F07** 정상·오류·경계 시험 생성 | constraint는 생략/null 허용. 수치·단위·경계는 text/출처에 보존하며 규칙 엔진은 보류 |
+| 오류 발생 조건·문구·발생 시점 | requirement.condition/action, validation 또는 error_message 조건 text/source_refs | **F03** 오류 조건 검토, **F05** 처리/문구 비교, **F07** 오류 시험의 단계 expected | 입력 검사 안내는 validation, 업무 확인 결과 메시지는 error_message. 팀원 2가 근거·문구 일치 정보 추가 |
+| 입력칸·날짜 형식·글자 수·비밀번호 가림 등 표시 | conditions[].category=display, text/source_refs, verifiable | **F03** 화면 표시 분류, **F05** 코드 검증 가능 조건 판정 | display와 verifiable은 독립. target은 원문 위치 언급이 없으면 unknown이며 근거 후보 필터로 사용하지 않음 |
 | 정확한 원문 인용·반복 조건의 연결 | source_refs, related_condition_keys | **F03** 출처 확인, **F05·F06** 판정 근거와 명세 연결, **F07·F09** 시험/출력 추적 | 서버가 후보 키를 ID로 치환하고 이력 보존 |
 | 모순·모호함·잘린 문장·읽기 실패·미분류 | ambiguity, review_reasons, warnings, DocumentArtifact.unread_locations | **F02** 부분 파싱/실패 안내, **F03** 검토 큐, **F09** 작업 오류/누락 안내 | 사용자와 백엔드가 검토·작업 상태 확정 |
 

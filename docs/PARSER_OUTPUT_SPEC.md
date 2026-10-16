@@ -1,6 +1,6 @@
 # 기획서 파싱 담당 전달용 출력 계약
 
-문서 버전: 2.5 · 요구사항 추출 계약: 2.2 · 갱신일: 2026-10-11
+문서 버전: 2.6 · 요구사항 추출 계약: 2.2 (호환 확장) · 갱신일: 2026-10-15
 
 먼저 읽기: [실제 기획서 추출 범위·기능명세 연결·팀원 전달 요청문](PARSER_HANDOFF_CHECKLIST.md).
 
@@ -21,7 +21,7 @@
 
 문서에 해당 기능이 있으면 `공지사항 → 공지사항 조회`, `회원가입 → 회원가입 신청` 같은 다른 소주제도 만든다. 예시에 있다는 이유로 문서에 없는 기능을 추가하지 않는다. 주제·소주제·요구사항·조건 개수는 고정하지 않는다.
 
-주제·소주제는 기능을 탐색하고 묶는 이름이다. `validation` 등 5개 조건 분류는 무엇을 검증하는지 나타내며 별도 필드로 유지한다. 소주제를 화면 이름·페이지 번호와 동일시하지 않는다. 한 소주제가 여러 화면에 걸칠 수 있고 화면 없는 API·배치 요구사항도 있을 수 있다.
+주제·소주제는 기능을 탐색하고 묶는 이름이다. `display` 등을 포함한 6개 조건 분류는 무엇을 검증하는지 나타내며 별도 필드로 유지한다. 소주제를 화면 이름·페이지 번호와 동일시하지 않는다. 한 소주제가 여러 화면에 걸칠 수 있고 화면 없는 API·배치 요구사항도 있을 수 있다.
 
 ## 2. 두 단계 출력과 전달 파일
 
@@ -57,7 +57,20 @@
 
 요구사항 하나에 반드시 소주제 하나를 지정한다. `stable_key, subtopic_key, screen_key, title, original_text, source_markers, condition, action, expected, req_type, origin, source_refs, conditions, review_reasons`를 모두 반환한다. 화면이 확인되지 않거나 적용되지 않으면 screen_key는 null이다. 조건·행동·기대 결과를 원문에서 확인할 수 없으면 해당 문자열은 비워두고 review_reasons에 사유를 남긴다. 검토 편의를 위한 제목을 붙여도 업무 규칙을 추가하지 않는다.
 
-수락조건 하나는 `stable_key, text, category, target, verifiable, source_refs, constraint, ambiguity, related_condition_keys`를 모두 반환한다. enum은 스키마·모델 담당 명세를 따른다. 한 요구사항의 conditions는 1개 이상이며 독립적으로 판정할 수 있는 규칙 단위로 나눈다. 의미 추출 결과의 origin은 extracted만 허용한다. 사용자 수동 추가는 별도 API 계약이다.
+수락조건 하나는 `stable_key, text, category, target, verifiable, source_refs, ambiguity, related_condition_keys`를 반환한다. `constraint`는 선택이며 생략 또는 null을 허용한다. 서버는 생략된 constraint를 null로 정규화한다. 한 요구사항의 conditions는 1개 이상이며 의미 추출 결과의 origin은 extracted만 허용한다. 사용자 수동 추가는 별도 API 계약이다. 2026-10-15 변경은 계약 2.2의 허용 입력 확장이며 기존 null/객체 출력도 유지한다. 소비자는 display enum을 함께 반영한다.
+
+| category | 분류 기준 |
+|---|---|
+| display | 입력칸·버튼·글자 수·날짜 형식·비밀번호 가림 등 화면 표시 |
+| validation | 입력값/형식/제한 검사와 그 검사에 딸린 안내 문구 |
+| navigation | 경로 및 화면 이동 |
+| business_logic | 업무 처리·상태 변경 |
+| data | 데이터 저장·조회 규칙 |
+| error_message | 로그인 실패·이미 가입된 이메일 등 업무 확인 결과 메시지 |
+
+target은 원문에 구현 위치가 명시된 경우만 frontend/backend/both로 지정하고 없으면 unknown으로 보낸다. 현재 샘플 PDF의 조건은 모두 unknown이다. category나 추정 스택으로 구현 위치를 채우지 않으며 target으로 근거 후보를 거르지 않는다. 실제 서버 검증 유무는 판정 결과 server_validation에 기록한다. verifiable은 category/target과 별개이며 display도 코드로 확인 가능하면 code다. 해당 화면 도달 범위 검사는 유지한다.
+
+빈 값은 `ambiguity: ""`, `related_condition_keys: []`, 요구사항의 `condition/action/expected: ""`로 보낸다. 서버는 추출 ambiguity 문자열을 수정 API의 문자열 배열로 변환한다(빈 문자열은 [], 사유가 있으면 [사유]). 판정 출력의 suggested_code는 수정 제안이 없으면 null이다.
 
 ### 3.1 PDF 화면·표시 번호·상태 보존
 
@@ -67,7 +80,7 @@
 
 일부 PDF 상단의 Depth·화면 ID·작성자는 일반 텍스트 추출에서 누락되므로 렌더링/OCR 확인이 필요하다. extraction_method=text/ocr이며 사람이 확인해 전사한 참조 예시는 manual_transcription으로 표시한다. 실제 자동 파서가 검토 없이 이 값을 사용하지 않는다. 블록의 원문 text와 읽기 편의를 위한 정규화 텍스트는 별도로 유지하고 quote 검증은 원문 text 기준이다.
 
-constraint는 수치 규칙이 있는 조건의 `{field,operator,value,unit,unit_definition}`이며 없으면 null이다. 연산자는 le/lt/ge/gt/eq다. PDF의 50MB 이하는 le/50/MB로 표현한다. 포함 경계는 명시돼 있으므로 모호하다고 바꾸지 않고 MB 바이트 정의만 미확정으로 남긴다. 오류 메시지 조건은 원문 문구·발생 상황을 함께 보존한다.
+constraint는 선택 수치 메타데이터 `{field,operator,value,unit,unit_definition}`다. 규칙 엔진은 보류 상태이며 값을 임의 생성하지 않는다. 생략하거나 null로 보내도 수치·단위·포함 경계는 text와 source_refs에 보존한다. 객체를 보내면 기존 스키마를 검사하며 연산자는 le/lt/ge/gt/eq다. PDF의 50MB 이하는 객체를 제공할 경우 le/50/MB이며 MB 바이트 정의만 미확정으로 남긴다. 오류 메시지 조건은 원문 문구·발생 상황을 함께 보존한다.
 
 ## 4. 제목·출처·검토 규칙
 

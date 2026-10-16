@@ -1,6 +1,6 @@
 # SpecPilot 모델 개발 분담 및 요구 기능 명세
 
-문서 버전: 2.5 · 갱신일: 2026-10-11
+문서 버전: 2.6 · 갱신일: 2026-10-15
 
 함께 읽을 문서: [기능명세](FUNCTIONAL_SPEC.md), [API 명세](API_SPEC.md), [팀원 1 출력 계약·전달용 안내](PARSER_OUTPUT_SPEC.md).
 
@@ -36,13 +36,15 @@ v2 API의 요청·저장·개정·출력과 내부 모델 출력 검증 경계�
 | M1-03 | OCR·읽기 실패 처리 | 이미지 페이지 탐지·OCR 결과 표시·실패 범위·신뢰도 경고. 읽지 못한 페이지를 성공 처리하지 않음 |
 | M1-04 | 주제·소주제·요구사항 추출 | 주제 → 소주제 → 요구사항 → 원자 수락조건으로 구조화. 제목·원문·전제 조건·사용자 동작·기대 결과·기능/비기능 유형 보존 |
 | M1-05 | 원자 수락조건 분해 | 한 번에 판정할 수 있는 조건 단위로 분해. 값·단위·연산자·예외를 보존 |
-| M1-06 | 분류·검증 가능 여부 | 5개 UI 분류, frontend/backend/both/unknown, code/not_statically_verifiable 분리 |
+| M1-06 | 분류·검증 가능 여부 | display를 포함한 6개 UI 분류, frontend/backend/both/unknown, code/not_statically_verifiable 분리 |
 | M1-07 | 원문 근거 연결 | 모든 모델 추출 항목에 기존 block_id와 원문 quote 연결. 위치는 파서가 제공 |
 | M1-08 | 중복·모호성·누락 탐지 | 반복 문장 관계 보존, 모순·출처 누락·분해 빈 결과·읽히지 않은 범위를 검토 큐로 반환 |
 | M1-09 | 개정 비교 지원 | 화면·표시 번호·내용·출처 비교 정보 제공. stable_key 승계는 서버가 확정 |
 | M1-10 | 구조화 출력 검증 | JSON 스키마·원문 인용·값 보존·ID 유효성 검사. 검증 실패 결과는 저장 승인하지 않음 |
 
-분류 값: validation(입력값 검증), navigation(경로 및 이동), business_logic(비즈니스 로직), data(데이터 저장), error_message(오류 메시지). 화면 수·요구사항 수·조건 수를 고정하지 않는다.
+분류 값: display(화면 표시), validation(입력값 검증 및 그 안내), navigation(경로 및 이동), business_logic(비즈니스 로직), data(데이터 저장), error_message(로그인 실패·중복 이메일 등 업무 확인 결과 메시지). 화면 수·요구사항 수·조건 수를 고정하지 않는다. category로 구현 위치나 정적 검증 가능 여부를 추정하지 않는다.
+
+target은 원문에 구현 위치가 명시된 경우만 지정하고 없으면 unknown이다. 현재 샘플은 모두 unknown으로 인계한다. 팀원 2는 target으로 frontend/backend 근거 후보를 거르지 않으며 같은 스냅샷의 관련 코드를 모두 고려한다. 실제 서버 검증은 server_validation에 기록하고 해당 화면 도달 범위 검사는 유지한다.
 
 수락조건 예:
 
@@ -59,7 +61,9 @@ v2 API의 요청·저장·개정·출력과 내부 모델 출력 검증 경계�
 
 원문 Depth·화면명·화면 ID·Description 번호·Action/Event 문자와 읽기 순서를 보존한다. 화면 ID가 텍스트 추출에서 빠지면 OCR 또는 검토 보완을 수행하고 방법을 표시한다. reference의 manual_transcription은 시각 확인한 예시 전사이며 OCR 실행 완료를 뜻하지 않는다. 원문과 정규화 텍스트를 분리하고 quote는 저장한 원문 블록과 정확히 일치하게 한다.
 
-LLM은 `topics[].subtopics[]`를 정의하고 요구사항의 subtopic_key로 연결한다. `source_markers`는 원문 Description/Action 번호이고 stable_key는 내부 후보 키다. 화면·팝업·오류 상태는 원문 화면 ID와 base_screen_key로 연결하며 원문에 없는 ID를 원문 번호처럼 만들지 않는다. 숫자 규칙은 constraint에 단위·연산자까지 보존한다. PDF의 **50MB 이하**는 le/50/MB이며 MB 바이트 정의만 확인 대상으로 남긴다.
+LLM은 `topics[].subtopics[]`를 정의하고 요구사항의 subtopic_key로 연결한다. `source_markers`는 원문 Description/Action 번호이고 stable_key는 내부 후보 키다. 화면·팝업·오류 상태는 원문 화면 ID와 base_screen_key로 연결하며 원문에 없는 ID를 원문 번호처럼 만들지 않는다. 숫자·단위·연산 경계는 text/source_refs에 보존한다. constraint는 선택 메타데이터로 생략/null을 허용하며 제공할 경우 PDF의 **50MB 이하**는 le/50/MB로 표현한다. MB 바이트 정의만 확인 대상으로 남긴다. 규칙 엔진은 CLAUDE.md 원칙 5에 따라 오류 관측 후 도입을 검토한다.
+
+추출 2.2는 2026-10-15에 display 추가·constraint 선택화로 허용 입력을 확장했다. 빈 ambiguity는 문자열 "", related_condition_keys는 [], condition/action/expected는 빈 문자열이다. 서버는 ambiguity를 HTTP 수정용 문자열 배열로 변환하고 생략 constraint를 null로 저장한다. 판정 모델의 suggested_code는 제안이 없으면 null이다. 파이프라인 어댑터는 message_match의 match를 matches로 변환하고, 숫자 청크 ID는 같은 snapshot의 파일/줄 범위로 v2 ID에 대응한다. 주제는 원문 Depth, 소주제는 괄호를 제외한 기본 화면명을 기준으로 묶을 수 있지만 화면 ID/원문 이름/팝업 관계는 보존한다.
 
 서버는 출처·후보 키·관계를 검증한 뒤 topic_id·subtopic_id·screen_id·requirement_id·condition_id를 발급한다. 원문 표시 번호와 개정 간 stable_key 승계는 별도로 관리한다. 검토 상태를 모델이 approved로 설정하지 않는다. 자세한 필드·실패·검토 규칙은 [팀원 1 출력 계약](PARSER_OUTPUT_SPEC.md)을 따른다.
 
@@ -145,8 +149,8 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
         {
           "id": "cond-name",
           "text": "업로드한 첨부 파일명을 입력창 안에 표시한다.",
-          "category": "business_logic",
-          "target": "frontend",
+          "category": "display",
+          "target": "unknown",
           "verifiable": "code",
           "ambiguity": "",
           "constraint": null,
@@ -161,7 +165,7 @@ AST·진입점·호출 연결의 결정적 추출은 코드 파서/규칙 모듈
           "id": "cond-remove",
           "text": "첨부 입력창 안의 x 버튼으로 첨부 파일을 삭제할 수 있다.",
           "category": "business_logic",
-          "target": "frontend",
+          "target": "unknown",
           "verifiable": "code",
           "ambiguity": "",
           "constraint": null,
@@ -300,7 +304,7 @@ Excel 한 행은 단계 한 개다. 예상결과는 단계별 expected(명세 �
 
 모델 호출 공통 인터페이스는 provider/model/profile/config_version을 백엔드에서 전달하고, 단계별 프롬프트와 출력 스키마만 달리한다. 키는 작업 인자·출력 JSON에 넣지 않고 실행 시 어댑터가 비밀 참조로 해결한다. 제한된 재시도·타임아웃·사용량은 공통 모듈에서 관리한다.
 
-표의 절차·입력·기대 결과를 사용자가 수정하면 이전 시험 예측은 새 revision에 그대로 적용하지 않는다. 팀원 2는 예측 갱신에 필요한 입력 계약을 제공하고, 백엔드는 기존 예측·수행 결과를 보존한다. 저장·취소 동작 자체는 모델을 호출하지 않는다. 내부 계약 버전: DocumentArtifact 2.1, 요구사항 추출·팀원 2 인계 2.2, 단계별 시험 생성 2.1, 코드 판정은 2.0 유지. 문서 버전 2.4와 내부 계약 버전을 구분한다.
+표의 절차·입력·기대 결과를 사용자가 수정하면 이전 시험 예측은 새 revision에 그대로 적용하지 않는다. 팀원 2는 예측 갱신에 필요한 입력 계약을 제공하고, 백엔드는 기존 예측·수행 결과를 보존한다. 저장·취소 동작 자체는 모델을 호출하지 않는다. 내부 계약 버전: DocumentArtifact 2.1, 요구사항 추출·팀원 2 인계 2.2, 단계별 시험 생성 2.1, 코드 판정은 2.0 유지. 문서 버전 2.6과 내부 계약 버전을 구분한다.
 
 ## 5. 권장 개발 순서와 전달물
 
