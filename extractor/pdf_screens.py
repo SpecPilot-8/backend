@@ -90,9 +90,15 @@ def _ocr_cell(page: pymupdf.Page, rect: pymupdf.Rect, lang: str = "kor+eng") -> 
     """셀 영역을 크롭해 OCR. (텍스트, 0~100 신뢰도) 반환."""
     pix = page.get_pixmap(clip=rect, matrix=pymupdf.Matrix(12, 12))
     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-    data = pytesseract.image_to_data(
-        img, lang=lang, config="--psm 7", output_type=pytesseract.Output.DICT
-    )
+    try:
+        data = pytesseract.image_to_data(
+            img, lang=lang, config="--psm 7", output_type=pytesseract.Output.DICT,
+            timeout=5,
+        )
+    except (pytesseract.TesseractError, pytesseract.TesseractNotFoundError, RuntimeError):
+        # Missing language data or a timed-out OCR cell must not discard other pages.
+        # extract_header/parse_screen records the empty value as a review warning.
+        return "", 0.0
     words = [w for w in data["text"] if w.strip()]
     confs = [float(c) for c, w in zip(data["conf"], data["text"]) if w.strip() and float(c) >= 0]
     text = " ".join(words).strip()

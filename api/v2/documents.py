@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 
 import pymupdf
 from fastapi import APIRouter, File, UploadFile, Query
+from fastapi.responses import FileResponse
 from pydantic import Field, model_validator
 from sqlalchemy import select
 
@@ -12,6 +13,7 @@ from api.errors import APIError
 from api.models import new_id
 from api.v2.common import Config, DB, Input, Limit, Offset, RevisionQuery, make_job, missing
 from api.v2.document_contracts import validate_extraction
+from api.v2.pdf_parser import parse_source
 from api.v2.storage import Revision, all_resources, create, page, project, public, replace, resource
 
 router = APIRouter(prefix='/api/v2/projects/{p}', tags=['v2 문서·요구사항'])
@@ -208,6 +210,13 @@ def document(p: str, d: str, db: DB):
     return doc_out(resource(db, p, d, 'document'))
 
 
+@router.get('/documents/{d}/file')
+def source_file(p: str, d: str, db: DB):
+    item = resource(db, p, d, 'document')
+    return FileResponse(item.data['storage_path'], media_type='application/pdf',
+                        filename=item.data['filename'], content_disposition_type='inline')
+
+
 @router.post('/documents/{d}/parse', status_code=202)
 def parse(p: str, d: str, body: DocumentVersion, db: DB):
     item = resource(db, p, d, 'document')
@@ -215,35 +224,13 @@ def parse(p: str, d: str, body: DocumentVersion, db: DB):
     # Replaying parse never replaces source block IDs referenced by saved requirements.
     if item.data['parse_status'] in ('parsed', 'partial'):
         return make_job(db, p, 'parse_document', body.model_dump(), result_ref={'kind': 'document', 'id': d})
-    blocks, unread = [], []
     try:
-        with pymupdf.open(item.data['storage_path']) as pdf:
-            for index, pg in enumerate(pdf, 1):
-                found = False
-                for raw in pg.get_text('blocks', sort=True):
-                    if raw[6] != 0 or not raw[4].strip():
-                        continue
-                    found = True
-                    blocks.append({'id': new_id(), 'document_id': d, 'document_revision': body.document_revision,
-                                   'location': {'kind': 'page', 'index': index, 'bbox': [raw[0], raw[1], raw[2]-raw[0], raw[3]-raw[1]]},
-                                   'text': raw[4], 'extraction_method': 'text', 'structure': {'section': 'paragraph', 'label': None,
-                                   'parent_block_id': None, 'reading_order': len(blocks) + 1}, 'warnings': []})
-                    if len(blocks) > 10000 or sum(len(b['text']) for b in blocks) > 2000000:
-                        raise ValueError
-                if not found:
-                    unread.append({'kind': 'page', 'index': index})
+        parsed = parse_source(item.data['storage_path'], d, body.document_revision)
     except Exception:
-        replace(db, item, {**item.data, 'parse_status': 'failed', 'warnings': [{'code': 'PARSE_FAILED', 'message': 'PDF 읽기 실패 또는 처리 한도 초과', 'block_ids': []}]})
-        j = make_job(db, p, 'parse_document', body.model_dump(), missing('document_parser', 'PDF 읽기 실패 또는 처리 한도 초과'))
-        row = resource(db, p, j['id'], 'job')
-        row.data = {**row.data, 'status': 'failed', 'events': [{'id': 1, 'event': 'failed', 'data': {**j, 'status': 'failed'}}]}
-        db.flush()
-        return {**j, 'status': 'failed'}
-    warnings = [{'code': 'LAYOUT_REVIEW_REQUIRED', 'message': '기본 텍스트 추출입니다. 화면 헤더·Description/Action·표 구조 인식 어댑터가 필요합니다', 'block_ids': []}]
-    if unread:
-        warnings.append({'code': 'OCR_REQUIRED', 'message': '텍스트가 없는 페이지에 OCR이 필요합니다', 'block_ids': []})
-    status = 'partial' if blocks else 'failed'
-    replace(db, item, {**item.data, 'parse_status': status, 'blocks': blocks, 'warnings': warnings, 'unread_locations': unread})
+        parsed = {'blocks': [], 'unread_locations': [], 'screens': [], 'parse_status': 'failed',
+                  'warnings': [{'code': 'PARSE_FAILED', 'message': 'PDF 읽기 실패 또는 처리 한도 초과', 'block_ids': []}]}
+    blocks = parsed['blocks']
+    replace(db, item, {**item.data, **parsed})
     if not blocks:
         j = make_job(db, p, 'parse_document', body.model_dump(), missing('ocr', '읽을 수 있는 원문이 없습니다'))
         row = resource(db, p, j['id'], 'job')
@@ -266,7 +253,7 @@ def blocks(p: str, d: str, db: DB, location_kind: Literal['page', 'sheet', 'slid
 def outline(p: str, d: str, db: DB):
     item = resource(db, p, d, 'document')
     return {'document_revision': item.data['revision'], 'items': [{'title': b['text'], 'location': b['location'], 'block_ids': [b['id']]}
-            for b in item.data['blocks'] if b['structure']['section'] == 'header'], 'warnings': item.data['warnings']}
+            for b in item.data['blocks'] if b['structure']['section'] == 'header' and b['structure'].get('header_field') == 'screen_name'], 'warnings': item.data['warnings']}
 
 
 @router.post('/documents/{d}/requirements/extract', status_code=202)
