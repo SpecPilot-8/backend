@@ -93,6 +93,18 @@ class ReviewRequest(Input):
     status: Literal['approved']
 
 
+class ManualGroup(DocumentVersion):
+    topic_title: str = Field(min_length=1, max_length=200)
+    subtopic_title: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode='after')
+    def titles_present(self):
+        self.topic_title, self.subtopic_title = self.topic_title.strip(), self.subtopic_title.strip()
+        if not self.topic_title or not self.subtopic_title:
+            raise ValueError('주제와 소주제를 입력하세요')
+        return self
+
+
 def doc_out(item):
     data = public(item)
     for k in ['storage_path', 'blocks', 'unread_locations', 'topic_ids', 'requirement_ids']:
@@ -280,6 +292,26 @@ def groups(p: str, d: str, db: DB, document_revision: RevisionQuery = None):
     for t in topics:
         t['subtopics'] = [public(s) for s in subs if s.data['topic_id'] == t['id']]
     return {'document_revision': revision, 'topics': topics}
+
+
+@router.post('/documents/{d}/requirement-groups', status_code=201)
+def manual_group(p: str, d: str, body: ManualGroup, db: DB):
+    from api.v2.testing import lock_project
+    lock_project(db, p)
+    document = resource(db, p, d, 'document')
+    check_document_version(document, body.document_revision)
+    common = {'document_id': d, 'document_revision': body.document_revision, 'title_origin': 'manual',
+              'source_refs': [], 'review_reasons': ['사용자가 작성한 기능 분류']}
+    topic = next((t for t in all_resources(db, p, 'topic') if t.data['document_id'] == d
+                  and t.data['document_revision'] == body.document_revision and t.data['title'] == body.topic_title), None)
+    if topic is None:
+        topic = create(db, p, 'topic', {**common, 'key': new_id(), 'title': body.topic_title})
+    sub = next((t for t in all_resources(db, p, 'subtopic') if t.data['topic_id'] == topic.id
+                and t.data['title'] == body.subtopic_title), None)
+    if sub is None:
+        sub = create(db, p, 'subtopic', {**common, 'topic_id': topic.id, 'key': new_id(),
+                                      'title': body.subtopic_title, 'screen_ids': []})
+    return {'topic_id': topic.id, 'subtopic_id': sub.id, 'document_revision': body.document_revision}
 
 
 @router.post('/requirements', status_code=201)
