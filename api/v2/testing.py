@@ -150,7 +150,8 @@ def lock_project(db, p):
 
 def spec_out(item, revision=None, db=None):
     data = public(item, revision, db)
-    data.pop('requirements', None)
+    fixed = data.pop('requirements', [])
+    data['requirement_versions'] = [{'requirement_id': r['id'], 'revision': r['revision']} for r in fixed]
     return data
 
 
