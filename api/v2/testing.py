@@ -227,6 +227,21 @@ def create_case(db, p, spec, data, origin='manual', prediction=None):
     return case
 
 
+@router.post('/test-specifications', status_code=201)
+def create_manual_specification(p: str, body: GenerateRequest, db: DB):
+    lock_project(db, p)
+    run = resource(db, p, body.verification_run_id, 'verification_run')
+    if len(body.requirement_ids) != len(set(body.requirement_ids)):
+        raise APIError(422, 'VALIDATION_ERROR', '요구사항 ID가 중복됩니다')
+    selected = [deepcopy(r) for r in run.data['requirements'] if r['id'] in body.requirement_ids]
+    if len(selected) != len(body.requirement_ids):
+        raise APIError(422, 'VALIDATION_ERROR', '선택 검증 실행에 없는 요구사항입니다')
+    spec = create(db, p, 'test_specification', {'verification_run_id': run.id, 'revision': 1, 'status': 'draft',
+                  'origin': 'manual', 'test_case_ids': [], 'case_versions': {}, 'requirements': selected,
+                  'revision_history': [{'revision': 1, 'date': now(), 'reason': '사용자 수동 사양서 등록'}]})
+    return spec_out(spec)
+
+
 @router.post('/test-specifications/generate', status_code=202)
 def generate(p: str, body: GenerateRequest, db: DB):
     lock_project(db, p)
