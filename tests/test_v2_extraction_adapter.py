@@ -89,3 +89,9 @@ def test_unknown_values_are_left_empty_not_guessed():
         assert (r["condition"], r["action"], r["expected"]) == ("", "", "")
         for c in r["conditions"]:
             assert c["target"] == "unknown" and c["constraint"] is None
+
+
+def test_ocr_warning_survives_artifact_adoption():
+    artifact, _ = build()
+    assert any(w['code'] == 'OCR_SOURCE_REVIEW' for w in artifact['warnings'])
+    assert all(w['block_ids'] for w in artifact['warnings'])
