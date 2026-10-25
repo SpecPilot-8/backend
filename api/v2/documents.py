@@ -201,13 +201,14 @@ async def upload_document(p: str, db: DB, config: Config, file: Annotated[Upload
         with pymupdf.open(stream=content, filetype='pdf') as pdf:
             if pdf.needs_pass or not content.startswith(b'%PDF-') or len(pdf) > 500 or not len(pdf):
                 raise ValueError
+            page_count = len(pdf)
     except Exception:
         raise APIError(415, 'UNSUPPORTED_FORMAT', '유효한 비암호화 PDF(1~500쪽)가 필요합니다') from None
     identity = new_id()
     target = config.data_dir / 'uploads' / f'{identity}.pdf'
     target.write_bytes(content)
     item = create(db, p, 'document', {'filename': filename, 'format': 'pdf', 'content_hash': sha256(content).hexdigest(),
-                  'revision': 1, 'parse_status': 'uploaded', 'warnings': [], 'blocks': [], 'unread_locations': [],
+                  'revision': 1, 'page_count': page_count, 'parse_status': 'uploaded', 'warnings': [], 'blocks': [], 'unread_locations': [],
                   'storage_path': str(target), 'extraction_status': 'not_run'}, identity)
     return doc_out(item)
 
