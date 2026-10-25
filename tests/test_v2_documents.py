@@ -110,3 +110,12 @@ def test_teammate_output_validated_before_storage(client, v2_project):
         assert first.data['source_markers'] and first.data['conditions'][0]['id']
         s = resource(db, v2_project, first.data['subtopic_id'], 'subtopic')
         assert first.data['screen_id'] in s.data['screen_ids']
+
+
+def test_document_file_returns_original_pdf(client, v2_project, v2_document):
+    r = client.get(f'/api/v2/projects/{v2_project}/documents/{v2_document}/file')
+    assert r.status_code == 200
+    assert r.headers['content-type'] == 'application/pdf'
+    assert r.headers['content-disposition'].startswith('inline')
+    assert r.content.startswith(b'%PDF-')
+    assert client.get(f'/api/v2/projects/{v2_project}/documents/missing/file').status_code == 404
