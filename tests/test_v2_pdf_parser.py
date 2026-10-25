@@ -43,6 +43,8 @@ def test_document_source_download_is_project_scoped(client, v2_project, v2_docum
     url = f'/api/v2/projects/{v2_project}/documents/{v2_document}/file'
     result = client.get(url)
     assert result.status_code == 200 and result.content.startswith(b'%PDF-')
+    metadata = client.get(url.removesuffix('/file')).json()
+    assert metadata['page_count'] == 1
     assert result.headers['content-type'] == 'application/pdf'
     other = client.post('/api/v2/projects', json={'name': 'Other'}).json()['id']
     assert client.get(url.replace(v2_project, other)).status_code == 404
