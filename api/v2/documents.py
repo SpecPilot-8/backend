@@ -211,10 +211,14 @@ def document(p: str, d: str, db: DB):
 
 
 @router.get('/documents/{d}/file')
-def source_file(p: str, d: str, db: DB):
+def document_file(p: str, d: str, db: DB):
+    # 화면에서 판정 옆에 원본 페이지를 띄우는 용도. 블록 location(page, bbox)과 같은 좌표계(PDF pt)다.
     item = resource(db, p, d, 'document')
-    return FileResponse(item.data['storage_path'], media_type='application/pdf',
-                        filename=item.data['filename'], content_disposition_type='inline')
+    path = Path(item.data.get('storage_path') or '')
+    if not path.is_file():
+        raise APIError(404, 'RESOURCE_NOT_FOUND', '원본 파일이 없습니다')
+    return FileResponse(path, media_type='application/pdf', filename=item.data['filename'], content_disposition_type='inline')
+
 
 
 @router.post('/documents/{d}/parse', status_code=202)
