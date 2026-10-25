@@ -60,4 +60,6 @@ python -m ruff check api services tests
 
 기능별 PR: backend #62~#68, frontend #10~#19. 기존 frontend #9의 원본 PDF 뷰어는 #18에 보존했다. 전체 링크와 의존 순서는 [통합 추적 #47](https://github.com/SpecPilot-8/backend/issues/47)을 따른다.
 
-원격 main 병합은 승인 대기 상태다. 자동 승인 검토가 기존 #9 승인·병합에 대한 구체적 승인이 부족하다고 거부하여 우회 병합하지 않았다. 따라서 기존 해결 대상 이슈는 PR에 연결하고 main 반영 전까지 열어 두었다. 모델 실행·키 연결·진행 복원·고급 조건 편집과 운영 권한은 별도로 남아 있다.
+2026-10-25 사용자 승인 후 backend #62~#68과 frontend #10~#19를 main에 병합했다. 기존 frontend #9도 #18을 통해 원래 커밋을 보존하여 병합됐다. 병합 직후 main의 파일 내용이 최종 검증 브랜치와 같은 것을 확인했고, 백엔드 66개 테스트·Ruff와 프런트 build/lint를 다시 통과했다. PDF 뷰어 번들 크기 경고는 유지된다.
+
+해결된 backend #56~#59, frontend #1/#3/#4를 종료했다. 자동 모델 실행·키 연결·진행 복원·고급 조건 편집·운영 권한 이슈는 유지한다. 후속 담당과 완료 기준은 [MVP 완성 작업 계획](MVP_COMPLETION_PLAN.md)을 따른다.
