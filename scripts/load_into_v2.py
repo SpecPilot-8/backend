@@ -28,6 +28,7 @@ from api.v2.documents import ingest_extraction
 from api.v2.storage import all_resources, replace, resource
 from api.v2.verdict_adapter import ingest_verdict
 from matcher.data import connect
+from db.load_code import chunk_repo
 
 REPO = Path(__file__).resolve().parent.parent
 STACKS = {"spring": ("spring-sample", "Spring Boot"), "react": ("react-sample", "React + Express")}
@@ -54,7 +55,7 @@ def load_pipeline(conn, repo_id: str):
         JOIN requirement q ON q.id = rc.requirement_id WHERE rc.run_id = %s""", (run_id,))
     # 요구사항 전체를 판정한 가장 최근 실행 (scripts/export_trace.py와 같은 기준)
     verdict_run = conn.execute("""
-        SELECT r.id, s.root_path FROM verdict_run r JOIN snapshot s ON s.id = r.snapshot_id
+        SELECT r.id, s.root_path, s.id FROM verdict_run r JOIN snapshot s ON s.id = r.snapshot_id
         WHERE s.repo_id = %s AND r.decompose_run_id = %s
           AND (SELECT count(*) FROM requirement_verdict v WHERE v.verdict_run_id = r.id) = %s
         ORDER BY r.id DESC LIMIT 1""", (repo_id, run_id, len(requirements))).fetchone()
@@ -80,10 +81,17 @@ def load_pipeline(conn, repo_id: str):
     return screens, requirements, conditions, verdicts, verdict_run
 
 
+def require_source_snapshot(code_root, repo_id, expected_snapshot):
+    current, _ = chunk_repo(code_root, repo_id)
+    if current != expected_snapshot:
+        raise ValueError('현재 코드가 저장된 판정의 스냅샷과 다릅니다. 원본 스냅샷 복원 또는 재분석이 필요합니다')
+
+
 def load_stack(client: TestClient, conn, stack: str) -> None:
     repo_id, label = STACKS[stack]
-    screens, requirements, conditions, verdicts, (verdict_run_id, root_path) = load_pipeline(conn, repo_id)
+    screens, requirements, conditions, verdicts, (verdict_run_id, root_path, pipeline_snapshot) = load_pipeline(conn, repo_id)
     code_root = (REPO / root_path).resolve()
+    require_source_snapshot(code_root, repo_id, pipeline_snapshot)
     pdf = Path({s["source_file"] for s in screens}.pop())
     if not pdf.is_absolute():
         pdf = REPO / pdf
@@ -101,7 +109,7 @@ def load_stack(client: TestClient, conn, stack: str) -> None:
         artifact = build_artifact(d, item.data["revision"], "sha256:" + item.data["content_hash"], screens, requirements)
         blocks = [{**b, "document_id": d, "document_revision": item.data["revision"]} for b in artifact["blocks"]]
         # 기본 텍스트 파싱 대신 파이프라인 파서(화면 헤더·Description/Action 행 인식) 결과를 문서 블록으로 채택한다
-        replace(db, item, {**item.data, "parse_status": "parsed", "blocks": blocks, "warnings": [],
+        replace(db, item, {**item.data, "parse_status": "partial" if artifact["warnings"] else "parsed", "blocks": blocks, "warnings": artifact["warnings"],
                            "unread_locations": []})
         draft = build_extraction(artifact, screens, requirements, conditions)
         req_ids = ingest_extraction(db, p, d, draft)

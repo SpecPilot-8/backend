@@ -55,6 +55,8 @@ def build_artifact(document_id: str, document_revision: int, content_hash: str,
         order += 1
         ocr_fields = [k for k, v in (s["header_source"] or {}).items() if v == "ocr"]
         warnings = [{"code": "HEADER_REVIEW", "message": m} for m in (s["review_reasons"] or [])]
+        if ocr_fields:
+            warnings.append({"code": "OCR_SOURCE_REVIEW", "message": "OCR 헤더는 원문 대조가 필요합니다: " + ", ".join(ocr_fields)})
         blocks.append({
             "id": _block_id(page, "header"),
             "location": {"kind": "page", "index": page},
@@ -90,7 +92,7 @@ def build_artifact(document_id: str, document_revision: int, content_hash: str,
         "format": "pdf",
         "blocks": blocks,
         "unread_locations": [],
-        "warnings": [],
+        "warnings": [{**w, "block_ids": [b["id"]]} for b in blocks for w in b["warnings"]],
     }
 
 
