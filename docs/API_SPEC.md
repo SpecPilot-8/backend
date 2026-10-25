@@ -560,3 +560,8 @@ SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/
 `POST /api/v2/projects/{p}/documents/{d}/parse`가 기존 화면 표 파서를 사용한다. 기존 텍스트와 좌표를 보존하며 header/description/action 블록, 원문 번호·문자와 OCR 출처를 추가한다. API 페이지는 1부터 시작한다. OCR 값은 원문 대조 경고를 유지하며, 스캔 페이지 전체 OCR·표 변형 의미 분석은 미지원이다. 일반 PDF는 기본 텍스트 partial로 보존한다. 재요청은 기존 block_id를 바꾸지 않는다. 자동 요구사항 추출은 계속 blocked다.
 
 `GET /api/v2/projects/{p}/documents/{d}/file`: 원본 PDF를 inline `application/pdf`로 반환한다. 프로젝트 범위가 다르면 404다. outline은 화면명 헤더와 해당 페이지를 반환한다.
+
+
+### 사용자 작성 기능 분류
+
+`POST /api/v2/projects/{p}/documents/{d}/requirement-groups`는 `document_revision`, `topic_title`, `subtopic_title`을 받는다. 같은 문서 개정·주제·소주제 조합은 기존 ID를 반환한다. 응답은 `topic_id`, `subtopic_id`, `document_revision`이다. 사용자 분류의 `title_origin`은 `manual`이며 모델 추출 결과로 표시하지 않는다. 반환한 subtopic_id를 요구사항 추가/수정에 사용한다. 다른 프로젝트는 404, 오래된 문서 개정은 409, 공백 제목은 422다.
