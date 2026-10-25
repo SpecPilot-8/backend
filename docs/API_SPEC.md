@@ -553,3 +553,10 @@ SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/
 4. 조건/청크/노드/시험 ID의 같은 프로젝트·버전 소속을 검사한다. 모델의 임의 경로·줄 번호는 거부한다.
 5. v1 PASS→passed, FAIL→failed, null→not_run으로 이관한다. 기존 기록에 수행 시간·환경이 없으면 없는 그대로 표시하며 만들어 채우지 않는다. 이전 actual/result를 새 절차 필드에 합치지 않는다.
 6. 실제 UI 시나리오로 표 저장·취소·배치 충돌·실패 복구·0/N 근거·작업 차단·과거 결과 보존을 검증한 뒤 v2 지원 상태를 켠다.
+
+
+## 2026-10-24: 문서 구조 파싱 연결
+
+`POST /api/v2/projects/{p}/documents/{d}/parse`가 기존 화면 표 파서를 사용한다. 기존 텍스트와 좌표를 보존하며 header/description/action 블록, 원문 번호·문자와 OCR 출처를 추가한다. API 페이지는 1부터 시작한다. OCR 값은 원문 대조 경고를 유지하며, 스캔 페이지 전체 OCR·표 변형 의미 분석은 미지원이다. 일반 PDF는 기본 텍스트 partial로 보존한다. 재요청은 기존 block_id를 바꾸지 않는다. 자동 요구사항 추출은 계속 blocked다.
+
+`GET /api/v2/projects/{p}/documents/{d}/file`: 원본 PDF를 inline `application/pdf`로 반환한다. 프로젝트 범위가 다르면 404다. outline은 화면명 헤더와 해당 페이지를 반환한다.
