@@ -9,6 +9,8 @@ VS Code 스타일 웹앱의 화면 흐름·목표 기능·완료 조건과 현�
 
 실제 v2 개발 범위·모델 미연결 API·추가 작업은 [구현·연동 상태](docs/IMPLEMENTATION_STATUS.md)를 따른다.
 
+최신 검증: [LLM 호출 제외 MVP 통합 점검](docs/INTEGRATION_TEST_REPORT.md).
+
 ## FastAPI 서버
 
 Python 3.11 이상에서 실행한다. 기존 CLI 엔진 옆에 프로젝트별 HTTP API를 기능별로 추가한다.
