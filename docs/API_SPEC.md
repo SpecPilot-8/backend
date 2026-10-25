@@ -565,3 +565,8 @@ SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/
 ### 사용자 작성 기능 분류
 
 `POST /api/v2/projects/{p}/documents/{d}/requirement-groups`는 `document_revision`, `topic_title`, `subtopic_title`을 받는다. 같은 문서 개정·주제·소주제 조합은 기존 ID를 반환한다. 응답은 `topic_id`, `subtopic_id`, `document_revision`이다. 사용자 분류의 `title_origin`은 `manual`이며 모델 추출 결과로 표시하지 않는다. 반환한 subtopic_id를 요구사항 추가/수정에 사용한다. 다른 프로젝트는 404, 오래된 문서 개정은 409, 공백 제목은 422다.
+
+
+### AI와 독립적인 수동 사양서 생성
+
+`POST /api/v2/projects/{p}/test-specifications`는 `verification_run_id`, `requirement_ids`를 받으며 201로 빈 수동 사양서를 반환한다. 실행에 고정된 승인 요구사항만 선택할 수 있다. 실행이 blocked여도 수동 사양서의 `status=draft`, `origin=manual`로 등록하며 판정이나 시험을 생성하지 않는다. 기존 generate API의 차단 상태는 바꾸지 않는다. 이후 POST test-cases와 edit-batches로 사용자가 시험을 작성·저장한다.
