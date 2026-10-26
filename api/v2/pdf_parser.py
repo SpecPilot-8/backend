@@ -5,7 +5,7 @@ This is document parsing only. It never generates acceptance conditions or verdi
 import pymupdf
 
 from api.models import new_id
-from extractor.pdf_screens import detect_layout, parse_screen
+from extractor.pdf_screens import detect_layout, parse_screen, extract_spaced_blocks
 
 PARSER_VERSION = 'pdf-layout-2'
 
@@ -33,7 +33,7 @@ def parse_source(path, document_id, revision):
     with pymupdf.open(path) as pdf:
         for index, pg in enumerate(pdf, 1):
             start = len(blocks)
-            for raw in pg.get_text('blocks', sort=True):
+            for raw in extract_spaced_blocks(pg, sort=True):
                 if raw[6] == 0:
                     add(raw[4], index, raw[:4])
             layout = detect_layout(pg)

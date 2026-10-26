@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import os
+import json
 import shlex
 from pathlib import Path
 from dataclasses import dataclass
@@ -126,12 +127,69 @@ def _ocr_cell(page: pymupdf.Page, rect: pymupdf.Rect, lang: str = "kor+eng") -> 
     return text, conf
 
 
+def extract_spaced_blocks(
+    page: pymupdf.Page, clip: pymupdf.Rect | None = None, sort: bool = False
+) -> list[tuple[float, float, float, float, str, int, int]]:
+    """PDF 문자 사이의 물리적 좌표 간격(gap)을 분석하여 누락된 공백을 복원한 텍스트 블록 목록을 반환.
+
+    피그마/PPT 등에서 PDF 출력 시 한글 폰트의 스페이스 문자가 탈락되고
+    글자 좌표 간격(advance kerning)으로만 띄어져 있는 경우, PyMuPDF get_text('blocks')는
+    공백 없이 글자를 붙여 반환한다. 이를 방지하기 위해 rawjson의 글자 좌표 간격을 측정해
+    폰트 크기의 10%를 초과하는 유의미한 간격에 공백(' ')을 복원한다.
+    """
+    raw_str = page.get_text("rawjson", clip=clip)
+    raw = json.loads(raw_str)
+    result_blocks = []
+
+    for b in raw.get("blocks", []):
+        if b.get("type") != 0:
+            continue
+        lines_text = []
+        for line in b.get("lines", []):
+            line_parts = []
+            spans = line.get("spans", [])
+            for s_idx, s in enumerate(spans):
+                chars = s.get("chars", [])
+                if not chars:
+                    continue
+                size = s.get("size", 10.0)
+                threshold = size * 0.10
+
+                span_str = []
+                for i, ch in enumerate(chars):
+                    c = ch["c"]
+                    span_str.append(c)
+                    if i < len(chars) - 1:
+                        next_ch = chars[i + 1]
+                        gap = next_ch["bbox"][0] - ch["bbox"][2]
+                        if gap > threshold and c != " " and next_ch["c"] != " ":
+                            span_str.append(" ")
+
+                line_parts.append("".join(span_str))
+                if s_idx < len(spans) - 1:
+                    next_s = spans[s_idx + 1]
+                    next_chars = next_s.get("chars", [])
+                    if next_chars:
+                        gap_span = next_chars[0]["bbox"][0] - chars[-1]["bbox"][2]
+                        if gap_span > threshold and line_parts[-1][-1] != " " and next_chars[0]["c"] != " ":
+                            line_parts.append(" ")
+            lines_text.append("".join(line_parts))
+
+        block_text = "\n".join(lines_text) + "\n"
+        bbox = tuple(b.get("bbox", (0.0, 0.0, 0.0, 0.0)))
+        result_blocks.append((bbox[0], bbox[1], bbox[2], bbox[3], block_text, b.get("number", 0), 0))
+
+    if sort:
+        result_blocks.sort(key=lambda b: (b[1], b[0]))
+    return result_blocks
+
+
 def extract_header(page: pymupdf.Page, layout: Layout | None = None) -> dict:
     """헤더 바(Depth/화면명/화면ID/작성자)를 추출. 직접 텍스트가 비면 OCR로 폴백."""
     layout = layout or detect_layout(page)
     # 헤더 행 y범위로 타이트하게 clip하면 PyMuPDF가 그 줄 전체를 한 블록으로
     # 합쳐버린다. 클립 없이 페이지 전체에서 블록을 뽑은 뒤 칸 영역으로 필터링한다.
-    all_blocks = page.get_text("blocks")
+    all_blocks = extract_spaced_blocks(page)
 
     result: dict[str, dict] = {}
     for field_name in HEADER_LABELS.values():
@@ -177,7 +235,7 @@ def _extract_rows(page: pymupdf.Page, x0_col: float, y0: float, y1: float) -> li
     직전 행에 이어 붙인다.
     """
     clip = pymupdf.Rect(x0_col, y0, page.rect.x1, y1)
-    blocks = page.get_text("blocks", clip=clip)
+    blocks = extract_spaced_blocks(page, clip=clip)
     blocks = [b for b in blocks if b[4].strip()]
     blocks.sort(key=lambda b: (b[1], b[0]))  # y, then x
 
