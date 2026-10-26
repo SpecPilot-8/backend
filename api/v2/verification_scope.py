@@ -135,7 +135,7 @@ def scope_options(db, p, snapshot, requirements, hint='auto'):
     presets = {}
     if stack:
         source = Path(__file__).resolve().parents[2] / 'matcher' / 'scope' / 'entries' / f'{stack}-sample.json'
-        presets = json.loads(source.read_text())
+        presets = json.loads(source.read_text(encoding='utf-8'))
     entry_files = [f for f in files if PurePosixPath(f).suffix.lower() in ('.java', '.js', '.jsx', '.html', '.htm', '.ts', '.tsx')]
     for group in groups:
         entries = saved.get('entries', {}).get(group['key'], [])
