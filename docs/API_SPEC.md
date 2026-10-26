@@ -180,6 +180,8 @@ constraint는 수동 입력·모델 추출 모두 생략/null/유효한 객체�
 | GET | `/projects/{p}/verification-runs/{v}/summary` | → 통계 |
 | GET | `/projects/{p}/verification-runs/{v}/requirements/{r}` | → 아래 Verification 상세 |
 
+macOS ZIP의 `__MACOSX`, `.AppleDouble`, `._*` 메타데이터는 소스에서 제외한다. 실제 소스가 UTF-8이 아니면 `SOURCE_ENCODING_UNSUPPORTED`와 `details.file_path`를 반환하며 자동 변환하지 않는다.
+
 ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 후 현행 기준 소스 합계 30MiB·3,000파일·파일당 1MiB 제한을 초기값으로 사용한다. 원격 Git URL 입력은 이 MVP 계약에 포함하지 않는다. 로컬 경로와 source_id 중 하나만 받는다. 스냅샷 준비 전에는 검증을 실행하지 않는다.
 
 실행 요청 예:
