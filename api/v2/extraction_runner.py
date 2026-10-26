@@ -208,8 +208,13 @@ def recover_interrupted(database):
         from sqlalchemy import select
         from api.v2.storage import Resource
         for job in db.scalars(select(Resource).where(Resource.kind == 'job')):
-            if job.data.get('operation') == 'extract_requirements' and job.data.get('status') in ('queued', 'running'):
-                data = {**job.data, 'status': 'failed', 'error': {'code': 'SERVER_RESTARTED', 'message': '서버가 재시작되어 추출을 중단했습니다. 자동 재호출하지 않았습니다'}}
+            if job.data.get('operation') in ('extract_requirements', 'verify') and job.data.get('status') in ('queued', 'running'):
+                data = {**job.data, 'status': 'failed', 'error': {'code': 'SERVER_RESTARTED', 'message': '서버가 재시작되어 분석을 중단했습니다. 자동 재호출하지 않았습니다'}}
                 event = {**job_out(job), 'status': 'failed', 'error': data['error']}
                 data['events'] = [*job.data['events'], {'id': len(job.data['events'])+1, 'event': 'failed', 'data': event}]
                 replace(db, job, data)
+                if job.data.get('operation') == 'verify':
+                    run_id = job.data.get('request', {}).get('verification_run_id')
+                    if run_id:
+                        run = resource(db, job.project_id, run_id, 'verification_run')
+                        replace(db, run, {**run.data, 'status': 'failed', 'error': data['error'], 'missing_features': []})

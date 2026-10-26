@@ -34,11 +34,11 @@ class Scope:
 
 
 class ScopeBuilder:
-    def __init__(self, repo_id: str, chunks: list[ChunkRow], root_path: str):
+    def __init__(self, repo_id: str, chunks: list[ChunkRow], root_path: str, entries: dict[str, list[str]] | None = None):
         if repo_id not in _STACKS:
             raise ValueError(f"{repo_id}: 범위 규칙이 정의되지 않은 스택")
         self.stack = _STACKS[repo_id]
-        self.entries: dict[str, list[str]] = {
+        self.entries: dict[str, list[str]] = entries if entries is not None else {
             k: v for k, v in json.loads((_ENTRIES_DIR / f"{repo_id}.json").read_text(encoding="utf-8")).items()
             if not k.startswith("_")
         }
