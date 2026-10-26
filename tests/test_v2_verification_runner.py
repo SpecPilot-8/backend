@@ -282,3 +282,22 @@ def test_queued_run_blocks_duplicates_and_restart_records_failure(linked, monkey
         run = restarted.get(f"/api/v2/projects/{p}/verification-runs/{queued['result_ref']['id']}").json()
         assert run["status"] == "failed"
     assert calls == []
+
+
+def test_cached_usage_is_recorded_separately_from_uncached_input():
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    verification_runner.add_usage(
+        usage,
+        {
+            "input_tokens": 7,
+            "output_tokens": 3,
+            "cache_read_input_tokens": 20,
+            "cache_creation_input_tokens": 30,
+        },
+    )
+    assert usage == {
+        "input_tokens": 7,
+        "output_tokens": 3,
+        "cache_read_input_tokens": 20,
+        "cache_creation_input_tokens": 30,
+    }
