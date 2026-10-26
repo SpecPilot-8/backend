@@ -30,7 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="SpecPilot API", version="0.2.0", lifespan=lifespan,
-        description="프로젝트·문서·코드·수동 판정 API. AI 요청은 blocked 작업으로 누락 기능을 반환합니다.",
+        description="프로젝트·문서·코드·수동 판정 및 서버 고정 모델 연결 검사 API. AI 분석 요청은 blocked 작업으로 누락 기능을 반환합니다.",
     )
     app.state.settings = config
     app.state.database = database

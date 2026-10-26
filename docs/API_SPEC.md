@@ -129,9 +129,15 @@ Project의 `tech_stack`은 `auto`(기본), `spring`, `react`, `typescript` 중 �
 
 `p`는 project_id다. 아래 모든 p도 동일하다. v2 Project 생성에서 workspace_path는 로컬 경로 방식일 때만 필요하다.
 
-ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabilities,credential_required}`. 프로필의 접속 주소는 서버 설정에서 관리한다. MVP enabled 프로필은 하나다. UI는 선택지 목록을 하드코딩하지 않고 활성 상태를 사용한다. Figma에 표시한 모델 예시는 실제 지원 목록을 보장하지 않는다.
+현재 테스트 모드는 **서버 환경변수 고정 모델**을 사용한다. `GET /model-profiles`는 `primary` 하나에 실제 provider/model과 `credential_source:"server_env"`, `credential_required:false`, `credential_configured`, `enabled`를 반환한다. `enabled`는 서버 설정 유효성만 뜻하며 실제 연결 성공은 아니다. 현재 capabilities는 `connection_check`만 보장하고 웹 AI 분석 실행은 별도 미연결이다.
 
-키 저장 API는 비밀 저장소를 구현한 뒤 활성화한다. 암호화된 저장과 별도 참조로 관리하며 원문 키를 조회할 API는 없다. 이 API의 재시도는 키를 로그에 출력하지 않는다. 로컬 모델 등 키가 필요 없는 프로필은 credential_ref가 null이다. 연결 확인은 제한된 실제 어댑터 호출로 검증하며, 연결 성공이 모델 정확도 검증은 아니다.
+`PUT /projects/{p}/llm`은 `{base_version,profile_id:"primary",credential_ref:null}`로 서버 모델을 프로젝트에 적용하고 config_version을 증가시킨다. 다른 프로필이나 키 참조는 422 `SERVER_MODEL_ONLY`, 미설정은 409 `LLM_NOT_CONFIGURED`, 버전 충돌은 409 `CONFIG_CHANGED`다. 키 저장 API는 계속 501이며 브라우저는 호출하지 않는다.
+
+`POST /projects/{p}/llm/connection-check`는 서버 키로 짧은 JSON 요청 **1회**를 보낸다. 자동 재시도 없이 출력 최대 256토큰, 요청 시간 제한 20초다. 문서·코드·개인 프롬프트는 보내지 않는다. 성공은 `{status:"connected",checked_at,provider,model,config_source:"server_env",json_verified:true,config_version}`. 502 오류 코드는 `LLM_AUTHENTICATION_FAILED`, `LLM_PERMISSION_DENIED`, `LLM_MODEL_NOT_FOUND`, `LLM_INSUFFICIENT_CREDITS`, `LLM_RATE_LIMITED`, `LLM_CONNECTION_FAILED`, `LLM_REQUEST_REJECTED`, `LLM_INVALID_RESPONSE`, 시간 초과는 504 `LLM_TIMEOUT`이다. 제공자 HTTP 본문과 예외 문자열은 반환하지 않는다.
+
+`GET /projects/{p}/llm`은 서버 provider/model, config_source, config_version과 실제 connection_status를 반환한다. 검사 이력에는 키 원문을 저장하지 않는다. 실패한 재검사·설정 변경·서버 키/모델 교체 후 과거 성공을 재사용하지 않는다. 키는 프로필·조회·로그·분석 산출물에 노출하지 않는다. 환경변수를 바꾸면 서버를 재시작하고 다시 연결 확인해야 한다.
+
+여러 업체와 모델을 사용자가 직접 설정하는 기능은 [이슈 #76](https://github.com/SpecPilot-8/backend/issues/76)에 후속 개발로 남긴다. 연결 성공은 JSON 호출 테스트이며 자동 요구사항 추출·코드 판정·시험 생성 완료를 의미하지 않는다.
 
 ## 5. 문서·명세 분석 API (v2 계약)
 

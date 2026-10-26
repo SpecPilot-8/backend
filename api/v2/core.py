@@ -7,7 +7,8 @@ from sqlalchemy import select, update
 from api.errors import APIError
 from api.models import new_id, now
 from api.v2.common import Config, DB, Input, Limit, Offset, job_out, missing
-from api.v2.storage import ProjectRecord, all_resources, page, project, resource
+from api.v2.storage import ProjectRecord, all_resources, page, project, resource, create, replace
+from api.v2.server_llm import server_profile, settings_fingerprint, probe_connection, connection_state
 from services.workspace import workspace_path
 
 router = APIRouter(prefix='/api/v2', tags=['v2 프로젝트·모델·작업'])
@@ -92,17 +93,17 @@ def edit_project(p: str, body: ProjectEdit, db: DB):
 
 
 @router.get('/model-profiles')
-def profiles():
-    return {'items': [{'id': 'primary', 'provider': 'unconfigured', 'model': 'unconfigured',
-            'display_name': '기본 모델 (연결 대기)', 'adapter_status': 'not_connected', 'enabled': False,
-            'capabilities': ['requirement_extraction', 'implementation_judgment', 'test_generation'], 'credential_required': True}]}
+def profiles(config: Config):
+    return {'items': [server_profile(config)]}
 
 
 @router.get('/projects/{p}/llm')
-def model_settings(p: str, db: DB):
+def model_settings(p: str, db: DB, config: Config):
     value = project(db, p)
-    return {'profile_id': value.profile_id, 'config_version': value.config_version,
-            'credential_configured': False, 'connection_status': 'not_connected'}
+    return {'profile_id': value.profile_id or 'primary', 'config_version': value.config_version,
+            'credential_configured': server_profile(config)['enabled'], 'config_source': 'server_env',
+            'connection_status': connection_state(db, p, value.config_version, config),
+            'provider': config.llm_provider, 'model': config.llm_model}
 
 
 @router.post('/projects/{p}/credentials', status_code=201)
@@ -112,20 +113,45 @@ def credentials(p: str, body: CredentialCreate, db: DB):
 
 
 @router.put('/projects/{p}/llm')
-def set_model(p: str, body: ModelSetting, db: DB):
+def set_model(p: str, body: ModelSetting, db: DB, config: Config):
     value = project(db, p)
-    if value.config_version != body.base_version:
+    if body.profile_id != 'primary' or body.credential_ref is not None:
+        raise APIError(422, 'SERVER_MODEL_ONLY', '현재는 서버에 설정된 모델과 API 키만 사용합니다')
+    if not server_profile(config)['enabled']:
+        raise APIError(409, 'LLM_NOT_CONFIGURED', '백엔드의 제공업체·모델·API 키 환경변수를 확인하세요')
+    result = db.execute(update(ProjectRecord).where(ProjectRecord.id == p, ProjectRecord.config_version == body.base_version)
+                        .values(profile_id='primary', config_version=body.base_version + 1),
+                        execution_options={'synchronize_session': False})
+    db.refresh(value)
+    if result.rowcount != 1:
         raise APIError(409, 'CONFIG_CHANGED', '모델 설정 버전이 변경되었습니다', details={'current_version': value.config_version})
-    if body.profile_id != 'primary':
-        raise APIError(422, 'VALIDATION_ERROR', '지원 목록에 없는 모델입니다')
-    raise APIError(501, 'FEATURE_NOT_IMPLEMENTED', '실제 모델 어댑터 연결이 필요합니다', missing('model_adapter', '선정된 단일 모델 어댑터가 필요합니다'))
+    return {'profile_id': 'primary', 'config_version': value.config_version, 'config_source': 'server_env',
+            'provider': config.llm_provider, 'model': config.llm_model}
 
 
 @router.post('/projects/{p}/llm/connection-check')
-def connection(p: str, body: ConnectionCheck, db: DB):
-    if project(db, p).config_version != body.config_version:
+def connection(p: str, body: ConnectionCheck, db: DB, config: Config):
+    value = project(db, p)
+    if value.config_version != body.config_version:
         raise APIError(409, 'CONFIG_CHANGED', '모델 설정 버전이 변경되었습니다')
-    raise APIError(501, 'FEATURE_NOT_IMPLEMENTED', '실제 연결 검사는 아직 지원하지 않습니다', missing('model_connection_check', '실제 제공자 호출 어댑터가 필요합니다'))
+    if value.profile_id != 'primary':
+        raise APIError(409, 'MODEL_NOT_SELECTED', '프로젝트에 서버 모델 설정을 먼저 적용하세요')
+    check = create(db, p, 'llm_connection', {'fingerprint': settings_fingerprint(config),
+                   'config_version': value.config_version, 'checked_at': None, 'status': 'checking'})
+    # 네트워크 대기 중 DB 쓰기 잠금을 잡지 않고 이전 성공도 먼저 무효화한다.
+    db.commit()
+    try:
+        result = probe_connection(config)
+    except APIError as error:
+        replace(db, check, {**check.data, 'status': 'failed', 'error_code': error.code})
+        db.commit()
+        raise
+    # 실제 요청 중 다른 설정이 저장되면 이전 요청의 성공을 새 설정에 적용하지 않는다.
+    db.refresh(value)
+    if value.config_version != body.config_version:
+        raise APIError(409, 'CONFIG_CHANGED', '연결 확인 중 모델 설정이 변경되었습니다')
+    replace(db, check, {**check.data, 'checked_at': result['checked_at'], 'status': 'connected'})
+    return {**result, 'config_version': value.config_version}
 
 
 @router.get('/projects/{p}/jobs')
