@@ -4,14 +4,14 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import pymupdf
-from fastapi import APIRouter, File, UploadFile, Query
+from fastapi import APIRouter, File, UploadFile, Query, BackgroundTasks, Request
 from fastapi.responses import FileResponse
 from pydantic import Field, model_validator
 from sqlalchemy import select
 
 from api.errors import APIError
 from api.models import new_id
-from api.v2.common import Config, DB, Input, Limit, Offset, RevisionQuery, make_job, missing
+from api.v2.common import Config, DB, Input, Limit, Offset, RevisionQuery, make_job, missing, job_out
 from api.v2.document_contracts import validate_extraction
 from api.v2.pdf_parser import parse_source
 from api.v2.storage import Revision, all_resources, create, page, project, public, replace, resource
@@ -21,6 +21,10 @@ router = APIRouter(prefix='/api/v2/projects/{p}', tags=['v2 문서·요구사항
 
 class DocumentVersion(Input):
     document_revision: int = Field(ge=1)
+
+
+class ParseRequest(DocumentVersion):
+    force: bool = False
 
 
 class ExtractRequest(DocumentVersion):
@@ -235,11 +239,15 @@ def document_file(p: str, d: str, db: DB):
 
 
 @router.post('/documents/{d}/parse', status_code=202)
-def parse(p: str, d: str, body: DocumentVersion, db: DB):
+def parse(p: str, d: str, body: ParseRequest, db: DB):
     item = resource(db, p, d, 'document')
     check_document_version(item, body.document_revision)
     # Replaying parse never replaces source block IDs referenced by saved requirements.
-    if item.data['parse_status'] in ('parsed', 'partial'):
+    if body.force and any(j.data.get('document_id') == d and j.data['status'] in ('queued', 'running') for j in all_resources(db, p, 'job')):
+        raise APIError(409, 'EXTRACTION_IN_PROGRESS', '요구사항 추출 중에는 원문을 다시 파싱할 수 없습니다')
+    if body.force and (item.data.get('requirement_ids') or any(r.data['document_id'] == d for r in all_resources(db, p, 'requirement'))):
+        raise APIError(409, 'DOCUMENT_SOURCE_IN_USE', '저장된 요구사항이 참조 중인 원문은 다시 파싱할 수 없습니다. 새 문서로 등록하세요')
+    if not body.force and item.data['parse_status'] in ('parsed', 'partial'):
         return make_job(db, p, 'parse_document', body.model_dump(), result_ref={'kind': 'document', 'id': d})
     try:
         parsed = parse_source(item.data['storage_path'], d, body.document_revision)
@@ -274,7 +282,7 @@ def outline(p: str, d: str, db: DB):
 
 
 @router.post('/documents/{d}/requirements/extract', status_code=202)
-def extract(p: str, d: str, body: ExtractRequest, db: DB):
+def extract(p: str, d: str, body: ExtractRequest, db: DB, settings: Config, request: Request, background_tasks: BackgroundTasks):
     item = resource(db, p, d, 'document')
     check_document_version(item, body.document_revision)
     if item.data['parse_status'] not in ('parsed', 'partial'):
@@ -284,7 +292,29 @@ def extract(p: str, d: str, body: ExtractRequest, db: DB):
     config = project(db, p)
     if config.config_version != body.model_config_version:
         raise APIError(409, 'CONFIG_CHANGED', '모델 설정 버전이 변경되었습니다')
-    return make_job(db, p, 'extract_requirements', body.model_dump(), missing('requirement_extraction', '팀원 1의 의미 추출 모델 어댑터가 필요합니다'))
+    from api.v2.server_llm import connection_state, server_profile
+    if not server_profile(settings)['enabled']:
+        return make_job(db, p, 'extract_requirements', body.model_dump(), missing('requirement_extraction', '서버 모델 연결을 먼저 설정하세요'))
+    if connection_state(db, p, config.config_version, settings) != 'connected':
+        raise APIError(409, 'MODEL_NOT_CONNECTED', '프로젝트 설정에서 실제 모델 연결을 먼저 확인하세요')
+    from api.v2.extraction_runner import QUEUE_LOCK, PROMPT_VERSION, prepare_document, run_extraction
+    if item.data.get('requirement_ids') or any(r.data['document_id'] == d for r in all_resources(db, p, 'requirement')):
+        raise APIError(409, 'EXTRACTION_ALREADY_STORED', '요구사항이 이미 저장되어 있습니다. 기존 항목을 편집하거나 새 문서로 분석하세요')
+    if item.data.get('parser_version') != 'pdf-layout-2':
+        raise APIError(409, 'DOCUMENT_REPARSE_REQUIRED', '한국어 OCR 설정을 확인한 뒤 문서를 다시 파싱하세요')
+    prepare_document(item.data)
+    with QUEUE_LOCK:
+        if any(j.data.get('document_id') == d and j.data['status'] in ('queued', 'running') for j in all_resources(db, p, 'job')):
+            raise APIError(409, 'EXTRACTION_IN_PROGRESS', '이 문서의 추출이 진행 중입니다. 진행 상태를 확인하세요')
+        job = make_job(db, p, 'extract_requirements', {**body.model_dump(), 'document_id': d},
+                       progress={'stage': 'queued', 'completed': 0, 'total': len(item.data['screens'])}, status='queued')
+        row = resource(db, p, job['id'], 'job')
+        row.data = {**row.data, 'document_id': d, 'model_config_snapshot': {
+            'provider': settings.llm_provider, 'model': settings.llm_model, 'config_version': config.config_version},
+            'prompt_version': PROMPT_VERSION}
+        db.commit()
+    background_tasks.add_task(run_extraction, request.app.state.database, p, d, row.id, settings)
+    return job_out(row)
 
 
 @router.get('/documents/{d}/requirement-groups')

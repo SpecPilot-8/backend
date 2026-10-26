@@ -7,7 +7,7 @@ import pymupdf
 from api.models import new_id
 from extractor.pdf_screens import detect_layout, parse_screen
 
-PARSER_VERSION = 'pdf-layout-1'
+PARSER_VERSION = 'pdf-layout-2'
 
 
 def parse_source(path, document_id, revision):
@@ -61,7 +61,7 @@ def parse_source(path, document_id, revision):
                             bid = add(row['body'], index, row['bbox'], section, row['seq_label'])
                             if bid:
                                 refs.append(bid)
-                    screens.append({k: screen[k] for k in ('screen_id', 'screen_name', 'depth', 'page_index', 'needs_review', 'review_reasons')})
+                    screens.append({k: screen[k] for k in ('screen_id', 'screen_name', 'depth', 'page_index', 'needs_review', 'review_reasons', 'header_source', 'header_confidence') if k in screen})
                     screens[-1].update(page=index, block_ids=refs)
                     if any(method == 'ocr' for method in screen['header_source'].values()):
                         screens[-1]['needs_review'] = True

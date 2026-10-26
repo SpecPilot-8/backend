@@ -41,7 +41,7 @@ def test_fixed_server_profile_and_settings_never_expose_key(server):
     item = r.json()['items'][0]
     assert item['model'] == 'test-model' and item['provider'] == 'anthropic'
     assert item['enabled'] and not item['credential_required']
-    assert item['capabilities'] == ['connection_check']
+    assert item['capabilities'] == ['connection_check', 'requirement_extraction']
     assert KEY not in r.text and KEY not in repr(config) and calls == []
     assert bind(client, p).json()['config_version'] == 1
     assert bind(client, p).status_code == 409
