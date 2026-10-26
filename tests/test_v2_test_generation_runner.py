@@ -22,6 +22,8 @@ def generation(linked, monkeypatch):
 
     def complete(**kwargs):
         calls.append(kwargs)
+        # 제공자에 보내는 스키마는 지원하는 구조/enum만 쓴다. 더 엄격한 검사는 응답 채택 전에 수행한다.
+        assert "maxItems" not in str(kwargs["schema"]) and "maxLength" not in str(kwargs["schema"])
         if control.hook:
             control.hook()
         if control.mode == "auth":
@@ -148,6 +150,28 @@ def test_empty_output_preserves_uncovered_conditions_without_fake_cases(generati
     _, job, spec = start(generation)
     assert job["status"] == "completed" and job["result"]["test_case_count"] == 0
     assert len(spec["uncovered_conditions"]) == 3 and spec["warnings"][-1]["code"] == "NO_TEST_CANDIDATES"
+
+
+def test_provider_sdk_rejection_is_safe_and_does_not_retry(generation, monkeypatch):
+    import anthropic
+    import httpx
+
+    attempts = []
+
+    def reject(**kwargs):
+        attempts.append(1)
+        raise anthropic.BadRequestError(
+            KEY,
+            response=httpx.Response(
+                400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+            ),
+            body={"error": {"message": KEY}},
+        )
+
+    monkeypatch.setattr(runner, "analysis_client", lambda _: SimpleNamespace(complete_json=reject))
+    _, job, spec = start(generation)
+    assert job["status"] == "failed" and job["error"]["code"] == "LLM_REQUEST_REJECTED"
+    assert attempts == [1] and KEY not in str(job) + str(spec)
 
 
 def test_source_version_scope_and_missing_verdict_checks_happen_before_calls(generation):

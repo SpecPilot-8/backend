@@ -275,6 +275,7 @@ def prepare_generation(p: str, body: GenerationRequest, db: DB, settings: Config
     if not enabled:
         raise APIError(409, 'LLM_NOT_CONFIGURED', '서버 모델 설정이 필요합니다')
     return {'verification_run_id': run.id, 'snapshot_id': run.data['snapshot_id'], 'model_config_version': config.config_version,
+            'provider': settings.llm_provider, 'model': settings.llm_model,
             'requirement_count': len(selected), 'condition_count': sum(len(r['conditions']) for r in selected),
             'subtopic_count': len(groups), 'max_model_calls': len(groups),
             'warnings': ['예상 결과는 승인된 명세로 생성하고 코드 예측은 기존 판정에서 따로 계산합니다.',
