@@ -316,3 +316,21 @@ def test_infer_suggested_files_matches_keywords_and_fallbacks():
     matched_unknown = infer_suggested_files({"title": "기타 미정 화면"}, files, "react")
     assert len(matched_unknown) > 0
 
+
+def test_cancel_running_job_transitions_to_cancelled(linked, monkeypatch):
+    c, p, _, body, _, calls, _ = linked
+    monkeypatch.setattr(verification_runner, "run_verification", lambda *a: None)
+    # 검증 작업 생성 (queued 상태)
+    r = c.post(f"/api/v2/projects/{p}/verification-runs", json=body)
+    assert r.status_code == 202
+    job_id = r.json()["id"]
+    # 취소 호출
+    cancel_resp = c.post(f"/api/v2/projects/{p}/jobs/{job_id}/cancel")
+    assert cancel_resp.status_code == 200
+    assert cancel_resp.json()["status"] == "cancelled"
+    assert cancel_resp.json()["error"]["code"] == "JOB_CANCELLED"
+    # 재취소 시 409
+    cancel_again = c.post(f"/api/v2/projects/{p}/jobs/{job_id}/cancel")
+    assert cancel_again.status_code == 409
+
+

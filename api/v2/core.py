@@ -166,6 +166,26 @@ def job(p: str, j: str, db: DB):
     return job_out(resource(db, p, j, 'job'))
 
 
+@router.post('/projects/{p}/jobs/{j}/cancel')
+def cancel_job(p: str, j: str, db: DB):
+    item = resource(db, p, j, 'job')
+    if item.data['status'] not in ('queued', 'running'):
+        raise APIError(409, 'JOB_NOT_RUNNING', f"이미 종료된 작업은 중단할 수 없습니다 (현재 상태: {item.data['status']})")
+
+    from api.v2.extraction_runner import transition_job
+    error_payload = {'code': 'JOB_CANCELLED', 'message': '사용자에 의해 작업이 중단되었습니다'}
+    transition_job(db, item, 'cancelled', error=error_payload)
+
+    ref = item.data.get('result_ref')
+    if ref and ref.get('kind') == 'verification_run' and ref.get('id'):
+        run_res = resource(db, p, ref['id'], 'verification_run')
+        if run_res.data['status'] in ('queued', 'running'):
+            replace(db, run_res, {**run_res.data, 'status': 'cancelled', 'error': error_payload})
+
+    db.commit()
+    return job_out(resource(db, p, j, 'job'))
+
+
 @router.get('/projects/{p}/jobs/{j}/events')
 def events(p: str, j: str, db: DB, last_event_id: Annotated[str | None, Header()] = None):
     item = resource(db, p, j, 'job')

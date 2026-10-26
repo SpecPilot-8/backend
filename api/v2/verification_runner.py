@@ -184,18 +184,27 @@ def run_verification(database, p, run_id, config):
                 with database.session() as db:
                     from api.v2.testing import lock_project
                     lock_project(db, p)
+                    job = resource(db, p, job_id, 'job')
+                    if job.data['status'] == 'cancelled':
+                        raise APIError(409, 'JOB_CANCELLED', '작업이 중단되었습니다')
                     if project(db, p).config_version != version:
                         raise APIError(409, 'CONFIG_CHANGED', '검증 중 모델 설정이 변경되었습니다. 완료된 이전 결과는 원래 설정으로 보존합니다')
                     ingest_verdict(db, p, run_id, draft, trusted, graph)
-                    job = resource(db, p, job_id, 'job')
                     transition_job(db, job, 'completed' if done == total else 'running',
                         progress={'stage': 'condition_judgment', 'completed': done, 'total': total}, usage=dict(usage),
                         result_ref={'kind': 'verification_run', 'id': run_id}, missing_features=[])
+            def on_progress(stage, done, total):
+                with database.session() as db:
+                    job = resource(db, p, job_id, 'job')
+                    if job.data['status'] == 'cancelled':
+                        raise APIError(409, 'JOB_CANCELLED', '작업이 중단되었습니다')
+                update_job(database, p, job_id, 'running',
+                    progress={'stage': stage, 'completed': done, 'total': total})
             with TemporaryDirectory(prefix='specpilot-verify-') as folder:
-                judge_run(run, snapshot, chunks, client, config.llm_api_key, Path(folder), deliver,
-                          lambda stage, done, total: update_job(database, p, job_id, 'running',
-                              progress={'stage': stage, 'completed': done, 'total': total}))
+                judge_run(run, snapshot, chunks, client, config.llm_api_key, Path(folder), deliver, on_progress)
         except APIError as error:
+            if error.code == 'JOB_CANCELLED':
+                return
             failure = {'code': error.code, 'message': error.message}
             mark_failed(database, p, run_id, job_id, failure)
         except Exception:
