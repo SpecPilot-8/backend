@@ -115,15 +115,17 @@ source_screen_id는 원문 화면 번호이며 시험번호(test_no)와 서버 D
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
 | GET | `/capabilities` | 포맷·스택·기능별 status와 missing_features |
-| POST | `/projects` | `{name,workspace_path?}` → 201 Project |
+| POST | `/projects` | `{name,workspace_path?,tech_stack?}` → 201 Project |
 | GET | `/projects` | limit,offset → Page[Project] |
 | GET | `/projects/{p}` | → Project |
-| PATCH | `/projects/{p}` | `{base_version,name}` → 수정 Project |
+| PATCH | `/projects/{p}` | `{base_version,name,tech_stack?}` → 수정 Project |
 | GET | `/model-profiles` | → `{items:[ModelProfile]}` |
 | GET | `/projects/{p}/llm` | → `{profile_id,config_version,credential_configured,connection_status}` |
 | PUT | `/projects/{p}/llm` | `{base_version,profile_id,credential_ref}` → 설정·새 config_version |
 | POST | `/projects/{p}/credentials` | `{profile_id,api_key}` → 201 `{credential_ref}` |
 | POST | `/projects/{p}/llm/connection-check` | `{config_version}` → 200 `{status:"connected",checked_at}` 또는 오류 |
+
+Project의 `tech_stack`은 `auto`(기본), `spring`, `react`, `typescript` 중 하나다. 프로젝트 생성·수정·목록·조회에 보존하며 수정에서 생략하거나 null이면 기존 값을 유지한다. 프로젝트 분류용 힌트이며 소스 필터가 아니다. 실제 파서는 파일 확장자로 선택하고 TypeScript는 텍스트 청크만 지원한다. 기존 프로젝트는 `auto`로 마이그레이션한다.
 
 `p`는 project_id다. 아래 모든 p도 동일하다. v2 Project 생성에서 workspace_path는 로컬 경로 방식일 때만 필요하다.
 

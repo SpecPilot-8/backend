@@ -1,5 +1,5 @@
 import json
-from typing import Annotated
+from typing import Annotated, Literal
 from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 from pydantic import Field, SecretStr
@@ -13,12 +13,17 @@ from services.workspace import workspace_path
 router = APIRouter(prefix='/api/v2', tags=['v2 프로젝트·모델·작업'])
 
 
+TechStack = Literal['auto', 'spring', 'react', 'typescript']
+
+
 class ProjectCreate(Input):
+    tech_stack: TechStack = 'auto'
     name: str = Field(min_length=1, max_length=200)
     workspace_path: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class ProjectEdit(Input):
+    tech_stack: TechStack | None = None
     base_version: int = Field(ge=1)
     name: str = Field(min_length=1, max_length=200)
 
@@ -40,7 +45,7 @@ class ConnectionCheck(Input):
 
 def project_out(value):
     return {'id': value.id, 'name': value.name, 'version': value.version,
-            'created_at': value.created_at, 'selected_model_profile_id': value.profile_id}
+            'tech_stack': value.tech_stack, 'created_at': value.created_at, 'selected_model_profile_id': value.profile_id}
 
 
 @router.get('/capabilities')
@@ -55,7 +60,7 @@ def capabilities(config: Config):
 
 @router.post('/projects', status_code=201)
 def create_project(body: ProjectCreate, db: DB, config: Config):
-    value = ProjectRecord(id=new_id(), name=body.name, version=1, config_version=0, created_at=now(),
+    value = ProjectRecord(id=new_id(), name=body.name, tech_stack=body.tech_stack, version=1, config_version=0, created_at=now(),
                           workspace_path=str(workspace_path(body.workspace_path, config)) if body.workspace_path else None)
     db.add(value)
     db.flush()
@@ -75,8 +80,11 @@ def get_project(p: str, db: DB):
 @router.patch('/projects/{p}')
 def edit_project(p: str, body: ProjectEdit, db: DB):
     value = project(db, p)
+    changes = {'name': body.name, 'version': body.base_version + 1}
+    if body.tech_stack is not None:
+        changes['tech_stack'] = body.tech_stack
     result = db.execute(update(ProjectRecord).where(ProjectRecord.id == p, ProjectRecord.version == body.base_version)
-                        .values(name=body.name, version=body.base_version + 1), execution_options={'synchronize_session': False})
+                        .values(**changes), execution_options={'synchronize_session': False})
     db.refresh(value)
     if result.rowcount != 1:
         raise APIError(409, 'VERSION_CONFLICT', '프로젝트 변경 버전이 충돌했습니다', details={'current_version': value.version})

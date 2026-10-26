@@ -14,6 +14,7 @@ class ProjectRecord(Base):
     __tablename__ = 'api_v2_project'
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(200))
+    tech_stack: Mapped[str] = mapped_column(String(32), default='auto', server_default='auto')
     workspace_path: Mapped[str | None] = mapped_column(String(4096), nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     config_version: Mapped[int] = mapped_column(Integer, default=0)
