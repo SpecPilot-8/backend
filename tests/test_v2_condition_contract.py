@@ -16,8 +16,8 @@ EXAMPLES = Path(__file__).resolve().parents[1] / 'docs/examples'
 
 
 def example():
-    return (json.loads((EXAMPLES / 'requirement-extraction.json').read_text(encoding='utf-8')),
-            json.loads((EXAMPLES / 'document-artifact.json').read_text(encoding='utf-8')))
+    return (json.loads((EXAMPLES / 'requirement-extraction.json').read_text()),
+            json.loads((EXAMPLES / 'document-artifact.json').read_text()))
 
 
 @pytest.mark.parametrize('constraint', ['omitted', None, {'field': '제목', 'operator': 'le', 'value': 50, 'unit': '자', 'unit_definition': None}])

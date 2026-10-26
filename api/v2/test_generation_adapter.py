@@ -7,7 +7,7 @@ from api.errors import APIError
 from api.v2.storage import resource
 from api.v2.testing import CaseCreate, create_case, lock_project, update_spec, validate_case
 
-_SCHEMA = json.loads((Path(__file__).resolve().parents[2] / 'docs/schemas/test-generation.schema.json').read_text(encoding='utf-8'))
+_SCHEMA = json.loads((Path(__file__).resolve().parents[2] / 'docs/schemas/test-generation.schema.json').read_text())
 _VALIDATOR = Draft202012Validator(_SCHEMA)
 
 
