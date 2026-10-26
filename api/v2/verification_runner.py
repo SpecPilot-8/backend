@@ -18,8 +18,8 @@ from matcher.select import select_for_screen
 from verdict.judge import ConditionInput, ConditionJudgment, ScreenContext, judge_requirement
 from verdict.rules import Evidence, pre_judge
 
-PROMPT_VERSION = 'select-v1/judge-v5-web-1'
-RULES_VERSION = 'scope-static-v1/aggregate-v1'
+PROMPT_VERSION = 'select-v1-enum/judge-v5-web-2'
+RULES_VERSION = 'scope-static-v1-filter-2/aggregate-v1'
 
 
 class ValidatedClient:
@@ -48,10 +48,10 @@ class ValidatedClient:
 
 
 def add_usage(total, usage):
-    for key in ('input_tokens', 'output_tokens'):
+    for key in ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'):
         n = usage.get(key, 0)
         if isinstance(n, int) and not isinstance(n, bool) and n >= 0:
-            total[key] += n
+            total[key] = total.get(key, 0) + n
 
 
 def graph_for(builder, allowed_ids, ids, metadata):
