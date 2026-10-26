@@ -431,6 +431,20 @@ def approve(p: str, r: str, body: ReviewRequest, db: DB):
     return requirement_out(db, replace(db, item, data, body.base_revision))
 
 
+@router.post('/requirements/review-all')
+def approve_all(p: str, db: DB):
+    items = all_resources(db, p, 'requirement')
+    updated = []
+    for item in items:
+        if item.data.get('review_status') != 'approved':
+            data = deepcopy(item.data)
+            data['conditions'] = condition_payloads(db, p, data, public(item))
+            data.update(revision=item.version + 1, review_status='approved')
+            replace(db, item, data, item.version)
+            updated.append(item.id)
+    return {'success': True, 'approved_count': len(updated), 'approved_ids': updated}
+
+
 def check_requirement_revision(item, base_revision):
     if item.version != base_revision:
         raise APIError(409, 'VERSION_CONFLICT', '다른 수정이 먼저 저장되었습니다',

@@ -37,6 +37,18 @@ def test_requirement_review_and_revision_preserved(client, v2_project, v2_requir
     assert client.patch(url, json={'base_revision': 3, 'original_text': '원문변경'}).status_code == 422
 
 
+def test_approve_all_requirements(client, v2_project, v2_requirement):
+    url = f"/api/v2/projects/{v2_project}/requirements"
+    res = client.post(f"{url}/review-all")
+    assert res.status_code == 200
+    data = res.json()
+    assert data['success'] is True
+    assert data['approved_count'] >= 1
+    # Check that requirement is now approved
+    req_res = client.get(f"{url}/{v2_requirement['id']}")
+    assert req_res.json()['review_status'] == 'approved'
+
+
 def test_related_historical_condition_survives_owner_edit(client, v2_project, v2_document, v2_requirement):
     base = f'/api/v2/projects/{v2_project}/requirements'
     old_condition = v2_requirement['conditions'][0]['id']
