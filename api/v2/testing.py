@@ -3,13 +3,13 @@ from datetime import timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import AwareDatetime, Field, model_validator
 from sqlalchemy import update
 
 from api.errors import APIError
 from api.models import now
-from api.v2.common import DB, Input, Limit, Offset, RevisionQuery, make_job, missing
+from api.v2.common import DB, Config, Input, Limit, Offset, RevisionQuery, make_job, missing
 from api.v2.storage import ProjectRecord, all_resources, create, historical, page, public, replace, replay, remember, resource
 
 router = APIRouter(prefix='/api/v2/projects/{p}', tags=['v2 시험 절차·수행·표 저장'])
@@ -41,6 +41,10 @@ class Step(Input):
 class GenerateRequest(Input):
     verification_run_id: str
     requirement_ids: list[str] = Field(min_length=1, max_length=1000)
+
+
+class GenerationRequest(GenerateRequest):
+    model_config_version: int | None = Field(default=None, ge=0)
 
 
 class CaseCreate(Input):
@@ -243,24 +247,73 @@ def create_manual_specification(p: str, body: GenerateRequest, db: DB):
     return spec_out(spec)
 
 
-@router.post('/test-specifications/generate', status_code=202)
-def generate(p: str, body: GenerateRequest, db: DB):
-    lock_project(db, p)
+def generation_input(p, body, db, settings):
     run = resource(db, p, body.verification_run_id, 'verification_run')
     if len(body.requirement_ids) != len(set(body.requirement_ids)):
         raise APIError(422, 'VALIDATION_ERROR', '요구사항 ID가 중복됩니다')
     selected = [deepcopy(r) for r in run.data['requirements'] if r['id'] in body.requirement_ids]
     if len(selected) != len(body.requirement_ids):
         raise APIError(422, 'VALIDATION_ERROR', '선택 검증 실행에 없는 요구사항입니다')
-    spec = create(db, p, 'test_specification', {'verification_run_id': run.id, 'revision': 1, 'status': 'blocked', 'test_case_ids': [],
-                  'case_versions': {}, 'requirements': selected, 'revision_history': [{'revision': 1, 'date': now(), 'reason': '사양서 등록'}]})
-    needed = missing('test_case_generation', '팀원 2의 단계별 테스트 생성 모델 어댑터가 필요합니다')
+    from api.v2.storage import project
+    from api.v2.server_llm import connection_state, server_profile
+    config = project(db, p)
+    if body.model_config_version is not None and config.config_version != body.model_config_version:
+        raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되었습니다')
+    enabled = server_profile(settings)['enabled']
+    groups = {}
+    if enabled:
+        if connection_state(db, p, config.config_version, settings) != 'connected':
+            raise APIError(409, 'MODEL_NOT_CONNECTED', '프로젝트 설정에서 서버 모델의 실제 연결을 먼저 확인하세요')
+        from api.v2.test_generation_runner import prepare_groups
+        groups = prepare_groups(public(run), selected)
+    return run, selected, config, enabled, groups
+
+
+@router.post('/test-specifications/generate/prepare')
+def prepare_generation(p: str, body: GenerationRequest, db: DB, settings: Config):
+    run, selected, config, enabled, groups = generation_input(p, body, db, settings)
+    if not enabled:
+        raise APIError(409, 'LLM_NOT_CONFIGURED', '서버 모델 설정이 필요합니다')
+    return {'verification_run_id': run.id, 'snapshot_id': run.data['snapshot_id'], 'model_config_version': config.config_version,
+            'provider': settings.llm_provider, 'model': settings.llm_model,
+            'requirement_count': len(selected), 'condition_count': sum(len(r['conditions']) for r in selected),
+            'subtopic_count': len(groups), 'max_model_calls': len(groups),
+            'warnings': ['예상 결과는 승인된 명세로 생성하고 코드 예측은 기존 판정에서 따로 계산합니다.',
+                         '생성 결과는 검토할 초안입니다. 실제 수행 O/X는 생성하지 않습니다.']}
+
+
+@router.post('/test-specifications/generate', status_code=202)
+def generate(p: str, body: GenerationRequest, db: DB, settings: Config, request: Request, background_tasks: BackgroundTasks):
+    lock_project(db, p)
+    run, selected, config, enabled, groups = generation_input(p, body, db, settings)
+    needed = [] if enabled else missing('model_connection', '서버 모델 연결 설정이 필요합니다')
     if run.data['status'] != 'completed':
         needed += missing('verification_result', '선택 실행의 코드 판정도 아직 완료되지 않았습니다')
-    job = make_job(db, p, 'generate_test_specification', {**body.model_dump(), 'test_specification_id': spec.id}, needed)
-    spec.data = {**spec.data, 'job_id': job['id']}
-    db.flush()
+    from api.v2.extraction_runner import QUEUE_LOCK
+    from api.v2.test_generation_runner import PROMPT_VERSION, RULES_VERSION, run_generation
+    with QUEUE_LOCK:
+        if enabled and any(j.data['operation'] == 'generate_test_specification' and j.data['status'] in ('queued', 'running') for j in all_resources(db, p, 'job')):
+            raise APIError(409, 'GENERATION_IN_PROGRESS', '테스트케이스 생성이 진행 중입니다. 기존 작업의 진행 상태를 확인하세요')
+        model = {'config_version': config.config_version, 'profile_id': config.profile_id, 'provider': settings.llm_provider, 'model': settings.llm_model}
+        spec = create(db, p, 'test_specification', {'verification_run_id': run.id, 'snapshot_id': run.data['snapshot_id'],
+                      'revision': 1, 'origin': 'generated', 'status': 'queued' if enabled else 'blocked',
+                      'generation_status': 'queued' if enabled else 'blocked', 'model_config_snapshot': model,
+                      'prompt_version': PROMPT_VERSION, 'rules_version': RULES_VERSION,
+                      'test_case_ids': [], 'case_versions': {}, 'requirements': selected, 'warnings': [], 'uncovered_conditions': [],
+                      'revision_history': [{'revision': 1, 'date': now(), 'reason': 'AI 테스트케이스 생성 요청'}]})
+        job = make_job(db, p, 'generate_test_specification', {**body.model_dump(), 'test_specification_id': spec.id}, needed,
+                       result_ref={'kind': 'test_specification', 'id': spec.id} if enabled else None,
+                       progress={'stage': 'queued', 'completed': 0, 'total': len(groups)}, status='queued' if enabled else 'blocked')
+        spec.data = {**spec.data, 'job_id': job['id']}
+        db.commit()
+    if enabled:
+        background_tasks.add_task(run_generation, request.app.state.database, p, spec.id, settings)
     return job
+
+
+def ensure_editable(spec):
+    if spec.data['status'] in ('queued', 'running'):
+        raise APIError(409, 'GENERATION_IN_PROGRESS', '생성 중에는 시험 초안을 편집할 수 없습니다')
 
 
 @router.get('/test-specifications')
@@ -277,6 +330,7 @@ def specification(p: str, t: str, db: DB, revision: RevisionQuery = None):
 def add_case(p: str, body: CaseCreate, db: DB):
     lock_project(db, p)
     spec = resource(db, p, body.test_specification_id, 'test_specification')
+    ensure_editable(spec)
     case = create_case(db, p, spec, body.model_dump(mode='json'))
     update_spec(db, spec, {**spec.data['case_versions'], case.id: 1}, '수동 시험 추가')
     return public(case)
@@ -303,6 +357,7 @@ def procedure(p: str, tc: str, body: ProcedureEdit, db: DB):
     lock_project(db, p)
     case = resource(db, p, tc, 'test_case')
     spec = resource(db, p, case.data['test_specification_id'], 'test_specification')
+    ensure_editable(spec)
     data = changed_procedure(db, p, case, spec, body)
     replace(db, case, data, body.base_revision)
     update_spec(db, spec, {**spec.data['case_versions'], case.id: data['revision']}, '시험 절차 수정')
@@ -398,6 +453,7 @@ def save_batch(p: str, t: str, body: Batch, db: DB):
     if saved is not None:
         return saved
     spec = resource(db, p, t, 'test_specification')
+    ensure_editable(spec)
     if spec.data['revision'] != body.base_specification_revision:
         raise APIError(409, 'VERSION_CONFLICT', '사양서 버전이 변경되었습니다', details={'current_revision': spec.data['revision'], 'items': []})
     ids = [c.test_case_id for c in body.changes]

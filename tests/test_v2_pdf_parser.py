@@ -48,3 +48,35 @@ def test_document_source_download_is_project_scoped(client, v2_project, v2_docum
     assert result.headers['content-type'] == 'application/pdf'
     other = client.post('/api/v2/projects', json={'name': 'Other'}).json()['id']
     assert client.get(url.replace(v2_project, other)).status_code == 404
+
+
+def test_missing_korean_data_never_silently_falls_back_to_english(tmp_path, monkeypatch):
+    monkeypatch.setenv('TESSDATA_PREFIX', str(tmp_path))
+    (tmp_path / 'eng.traineddata').touch()
+    monkeypatch.setattr(pytesseract, 'image_to_data', lambda *a, **k: (_ for _ in ()).throw(AssertionError('영문 대체 인식을 실행하면 안 됩니다')))
+    with pymupdf.open() as pdf:
+        assert _ocr_cell(pdf.new_page(), pymupdf.Rect(0, 0, 30, 20)) == ('', 0.0)
+
+
+def test_explicit_korean_data_directory_is_used(tmp_path, monkeypatch):
+    monkeypatch.setenv('TESSDATA_PREFIX', str(tmp_path))
+    for lang in ['kor', 'eng']:
+        (tmp_path / f'{lang}.traineddata').touch()
+    seen = {}
+    def recognize(*a, **kwargs):
+        seen.update(kwargs)
+        return {'text': ['통합', '로그인'], 'conf': [93, 94]}
+    monkeypatch.setattr(pytesseract, 'image_to_data', recognize)
+    with pymupdf.open() as pdf:
+        assert _ocr_cell(pdf.new_page(), pymupdf.Rect(0, 0, 30, 20)) == ('통합 로그인', 93.5)
+    assert '--tessdata-dir' in seen['config'] and str(tmp_path) in seen['config']
+
+
+def test_reparse_is_explicit_and_cannot_invalidate_saved_requirement_sources(client, v2_project, v2_document, v2_requirement):
+    base = f'/api/v2/projects/{v2_project}/documents/{v2_document}'
+    before = client.get(base + '/blocks').json()['items']
+    assert client.post(base + '/parse', json={'document_revision': 1}).status_code == 202
+    assert client.get(base + '/blocks').json()['items'] == before
+    r = client.post(base + '/parse', json={'document_revision': 1, 'force': True})
+    assert r.status_code == 409 and r.json()['error']['code'] == 'DOCUMENT_SOURCE_IN_USE'
+    assert client.get(base + '/blocks').json()['items'] == before

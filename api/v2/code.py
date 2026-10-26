@@ -14,9 +14,23 @@ from api.v2.common import Config, DB, Input, Limit, Offset, make_job
 from api.v2.storage import all_resources, create, page, project, public, resource
 
 router = APIRouter(prefix='/api/v2/projects/{p}/code', tags=['v2 코드 스냅샷'])
-EXTENSIONS = {'.java', '.js', '.jsx', '.html', '.htm', '.css', '.json', '.yaml', '.yml', '.properties', '.xml', '.ts', '.tsx'}
-IGNORED = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', 'target', 'build', 'dist'}
+EXTENSIONS = {'.java', '.js', '.jsx', '.html', '.htm', '.css', '.json', '.yaml', '.yml', '.properties', '.xml', '.ts', '.tsx', '.sql'}
+IGNORED = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', 'target', 'build', 'dist', '__MACOSX', '.AppleDouble'}
 _PARSER_LOCK = Lock()
+
+
+def supported_source(path):
+    return (not set(path.parts) & IGNORED and not any(part.startswith('._') for part in path.parts)
+            and path.suffix.lower() in EXTENSIONS)
+
+
+def decode_source(raw, path):
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError:
+        raise APIError(422, 'SOURCE_ENCODING_UNSUPPORTED',
+                       f"소스 파일 '{path}'이 UTF-8 형식이 아닙니다. 해당 파일을 UTF-8로 저장해 다시 업로드하세요.",
+                       details={'file_path': str(path), 'required_encoding': 'UTF-8'}) from None
 
 
 class IndexRequest(Input):
@@ -58,11 +72,8 @@ def source_files(content, config):
                 raw = archive.read(entry)
                 if len(raw) != entry.file_size:
                     raise APIError(422, 'UNSAFE_ARCHIVE', 'ZIP 파일 크기가 일치하지 않습니다')
-                if not set(path.parts) & IGNORED and path.suffix.lower() in EXTENSIONS:
-                    try:
-                        files[normalized] = raw.decode('utf-8')
-                    except UnicodeDecodeError:
-                        raise APIError(422, 'SOURCE_ENCODING_UNSUPPORTED', '코드 파일은 UTF-8이어야 합니다') from None
+                if supported_source(path):
+                    files[normalized] = decode_source(raw, normalized)
     except (BadZipFile, RuntimeError, NotImplementedError, OSError):
         raise APIError(415, 'UNSUPPORTED_FORMAT', '유효한 비암호화 ZIP 파일이 필요합니다') from None
     if not files:
@@ -73,7 +84,7 @@ def source_files(content, config):
 def local_files(root, config):
     files, size, count = {}, 0, 0
     for directory, dirs, names in os.walk(root, followlinks=False):
-        dirs[:] = sorted(d for d in dirs if d not in IGNORED)
+        dirs[:] = sorted(d for d in dirs if d not in IGNORED and not d.startswith('._'))
         if any((Path(directory) / d).is_symlink() for d in dirs):
             raise APIError(422, 'UNSAFE_SOURCE', '코드 경로의 심볼릭 링크는 지원하지 않습니다')
         for name in sorted(names):
@@ -81,7 +92,7 @@ def local_files(root, config):
             relative = path.relative_to(root)
             if path.is_symlink():
                 raise APIError(422, 'UNSAFE_SOURCE', '코드 경로의 심볼릭 링크는 지원하지 않습니다')
-            if path.suffix.lower() not in EXTENSIONS:
+            if not supported_source(relative):
                 continue
             if not path.resolve().is_relative_to(root):
                 raise APIError(422, 'UNSAFE_SOURCE', '소스 경로가 워크스페이스 밖에 있습니다')
@@ -91,10 +102,7 @@ def local_files(root, config):
             size += len(raw)
             if count > config.max_source_files or size > config.max_source_bytes or len(raw) > config.max_source_file_bytes:
                 raise APIError(413, 'SOURCE_LIMIT_EXCEEDED', '코드 파일 수·크기 한도를 초과했습니다')
-            try:
-                files[relative.as_posix()] = raw.decode('utf-8')
-            except UnicodeDecodeError:
-                raise APIError(422, 'SOURCE_ENCODING_UNSUPPORTED', '코드 파일은 UTF-8이어야 합니다') from None
+            files[relative.as_posix()] = decode_source(raw, relative.as_posix())
     if not files:
         raise APIError(422, 'EMPTY_SOURCE', '지원하는 소스 파일이 없습니다')
     return files
@@ -153,7 +161,7 @@ def index(p: str, body: IndexRequest, db: DB, config: Config):
     existing = next((s for s in all_resources(db, p, 'snapshot') if s.data['content_hash'] == content_hash), None)
     if existing:
         return make_job(db, p, 'index_code', body.model_dump(), result_ref={'kind': 'snapshot', 'id': existing.id})
-    warnings = [{'code': 'SOURCE_FILTER', 'message': '지원 확장자만 인덱싱합니다. 미지원 파일과 .git/node_modules/빌드 폴더는 분석 범위에서 제외됩니다'}, {'code': 'CALL_SCOPE_NOT_CONNECTED', 'message': '청킹은 완료되었으며 호출/화면 도달 범위 분석 어댑터는 미연결입니다'}]
+    warnings = [{'code': 'SOURCE_FILTER', 'message': '지원 소스 파일 전체를 인덱싱합니다. 미지원 파일, macOS 메타데이터, .git/node_modules/빌드 폴더는 제외됩니다'}, {'code': 'CALL_SCOPE_AT_VERIFICATION', 'message': '청킹을 완료했습니다. 검증 단계에서 화면 진입 파일을 확인하면 정적 도달 범위를 분석합니다'}]
     if any(Path(path).suffix.lower() in ('.ts', '.tsx') for path in files):
         warnings.append({'code': 'TYPESCRIPT_TEXT_ONLY', 'message': 'TypeScript는 원문 청크만 제공하며 의미 파서는 미지원입니다'})
     snapshot = create(db, p, 'snapshot', {'content_hash': content_hash, 'status': 'ready', 'source_kind': kind,

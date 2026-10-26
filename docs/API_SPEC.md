@@ -115,21 +115,29 @@ source_screen_id는 원문 화면 번호이며 시험번호(test_no)와 서버 D
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
 | GET | `/capabilities` | 포맷·스택·기능별 status와 missing_features |
-| POST | `/projects` | `{name,workspace_path?}` → 201 Project |
+| POST | `/projects` | `{name,workspace_path?,tech_stack?}` → 201 Project |
 | GET | `/projects` | limit,offset → Page[Project] |
 | GET | `/projects/{p}` | → Project |
-| PATCH | `/projects/{p}` | `{base_version,name}` → 수정 Project |
+| PATCH | `/projects/{p}` | `{base_version,name,tech_stack?}` → 수정 Project |
 | GET | `/model-profiles` | → `{items:[ModelProfile]}` |
 | GET | `/projects/{p}/llm` | → `{profile_id,config_version,credential_configured,connection_status}` |
 | PUT | `/projects/{p}/llm` | `{base_version,profile_id,credential_ref}` → 설정·새 config_version |
 | POST | `/projects/{p}/credentials` | `{profile_id,api_key}` → 201 `{credential_ref}` |
 | POST | `/projects/{p}/llm/connection-check` | `{config_version}` → 200 `{status:"connected",checked_at}` 또는 오류 |
 
+Project의 `tech_stack`은 `auto`(기본), `spring`, `react`, `typescript` 중 하나다. 프로젝트 생성·수정·목록·조회에 보존하며 수정에서 생략하거나 null이면 기존 값을 유지한다. 프로젝트 분류용 힌트이며 소스 필터가 아니다. 실제 파서는 파일 확장자로 선택하고 TypeScript는 텍스트 청크만 지원한다. 기존 프로젝트는 `auto`로 마이그레이션한다.
+
 `p`는 project_id다. 아래 모든 p도 동일하다. v2 Project 생성에서 workspace_path는 로컬 경로 방식일 때만 필요하다.
 
-ModelProfile: `{id,provider,model,display_name,adapter_status,enabled,capabilities,credential_required}`. 프로필의 접속 주소는 서버 설정에서 관리한다. MVP enabled 프로필은 하나다. UI는 선택지 목록을 하드코딩하지 않고 활성 상태를 사용한다. Figma에 표시한 모델 예시는 실제 지원 목록을 보장하지 않는다.
+현재 테스트 모드는 **서버 환경변수 고정 모델**을 사용한다. `GET /model-profiles`는 `primary` 하나에 실제 provider/model과 `credential_source:"server_env"`, `credential_required:false`, `credential_configured`, `enabled`를 반환한다. `enabled`는 서버 설정 유효성만 뜻하며 실제 연결 성공은 아니다. 현재 capabilities는 `connection_check`, `requirement_extraction`을 제공한다. 요구사항 추출은 화면 표 PDF와 원문 검토가 필요한 부분 지원이다. 웹 코드 판정·시험 생성은 별도 미연결이다.
 
-키 저장 API는 비밀 저장소를 구현한 뒤 활성화한다. 암호화된 저장과 별도 참조로 관리하며 원문 키를 조회할 API는 없다. 이 API의 재시도는 키를 로그에 출력하지 않는다. 로컬 모델 등 키가 필요 없는 프로필은 credential_ref가 null이다. 연결 확인은 제한된 실제 어댑터 호출로 검증하며, 연결 성공이 모델 정확도 검증은 아니다.
+`PUT /projects/{p}/llm`은 `{base_version,profile_id:"primary",credential_ref:null}`로 서버 모델을 프로젝트에 적용하고 config_version을 증가시킨다. 다른 프로필이나 키 참조는 422 `SERVER_MODEL_ONLY`, 미설정은 409 `LLM_NOT_CONFIGURED`, 버전 충돌은 409 `CONFIG_CHANGED`다. 키 저장 API는 계속 501이며 브라우저는 호출하지 않는다.
+
+`POST /projects/{p}/llm/connection-check`는 서버 키로 짧은 JSON 요청 **1회**를 보낸다. 자동 재시도 없이 출력 최대 256토큰, 요청 시간 제한 20초다. 문서·코드·개인 프롬프트는 보내지 않는다. 성공은 `{status:"connected",checked_at,provider,model,config_source:"server_env",json_verified:true,config_version}`. 502 오류 코드는 `LLM_AUTHENTICATION_FAILED`, `LLM_PERMISSION_DENIED`, `LLM_MODEL_NOT_FOUND`, `LLM_INSUFFICIENT_CREDITS`, `LLM_RATE_LIMITED`, `LLM_CONNECTION_FAILED`, `LLM_REQUEST_REJECTED`, `LLM_INVALID_RESPONSE`, 시간 초과는 504 `LLM_TIMEOUT`이다. 제공자 HTTP 본문과 예외 문자열은 반환하지 않는다.
+
+`GET /projects/{p}/llm`은 서버 provider/model, config_source, config_version과 실제 connection_status를 반환한다. 검사 이력에는 키 원문을 저장하지 않는다. 실패한 재검사·설정 변경·서버 키/모델 교체 후 과거 성공을 재사용하지 않는다. 키는 프로필·조회·로그·분석 산출물에 노출하지 않는다. 환경변수를 바꾸면 서버를 재시작하고 다시 연결 확인해야 한다.
+
+여러 업체와 모델을 사용자가 직접 설정하는 기능은 [이슈 #76](https://github.com/SpecPilot-8/backend/issues/76)에 후속 개발로 남긴다. 연결 성공은 JSON 호출 테스트이며 자동 요구사항 추출·코드 판정·시험 생성 완료를 의미하지 않는다.
 
 ## 5. 문서·명세 분석 API (v2 계약)
 
@@ -179,6 +187,8 @@ constraint는 수동 입력·모델 추출 모두 생략/null/유효한 객체�
 | GET | `/projects/{p}/verification-runs/{v}/traceability` | status,q,limit,offset → Page[추적표 행] |
 | GET | `/projects/{p}/verification-runs/{v}/summary` | → 통계 |
 | GET | `/projects/{p}/verification-runs/{v}/requirements/{r}` | → 아래 Verification 상세 |
+
+macOS ZIP의 `__MACOSX`, `.AppleDouble`, `._*` 메타데이터는 소스에서 제외한다. 실제 소스가 UTF-8이 아니면 `SOURCE_ENCODING_UNSUPPORTED`와 `details.file_path`를 반환하며 자동 변환하지 않는다.
 
 ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 후 현행 기준 소스 합계 30MiB·3,000파일·파일당 1MiB 제한을 초기값으로 사용한다. 원격 Git URL 입력은 이 MVP 계약에 포함하지 않는다. 로컬 경로와 source_id 중 하나만 받는다. 스냅샷 준비 전에는 검증을 실행하지 않는다.
 
@@ -570,3 +580,31 @@ SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/
 ### AI와 독립적인 수동 사양서 생성
 
 `POST /api/v2/projects/{p}/test-specifications`는 `verification_run_id`, `requirement_ids`를 받으며 201로 빈 수동 사양서를 반환한다. 실행에 고정된 승인 요구사항만 선택할 수 있다. 실행이 blocked여도 수동 사양서의 `status=draft`, `origin=manual`로 등록하며 판정이나 시험을 생성하지 않는다. 기존 generate API의 차단 상태는 바꾸지 않는다. 이후 POST test-cases와 edit-batches로 사용자가 시험을 작성·저장한다.
+
+
+### 화면 표 PDF의 웹 요구사항 추출 실행
+
+`POST /projects/{p}/documents/{d}/parse`는 `{document_revision,force?:false}`를 받는다. force는 저장된 요구사항이나 진행 중 추출이 없을 때만 원문 블록을 교체한다. 한국어 OCR 데이터 누락 시 영문 대체 인식을 사용하지 않는다. `pdf-layout-2` 파서의 한국어 설정은 [OCR_SETUP.md](OCR_SETUP.md)를 따른다.
+
+`POST /projects/{p}/documents/{d}/requirements/extract`는 서버 모델의 실제 연결 확인과 최신 파싱 결과를 요구한다. partial 문서는 사용자가 경고를 확인한 뒤 `accept_warnings:true`로 요청한다. queued 작업을 202로 반환하고 화면별로 기존 조건 분해기를 실행해 범주·인용을 검증한 v2 초안을 저장한다. PostgreSQL 파이프라인 테이블은 필요하지 않다.
+
+작업 조회/SSE는 queued → running(완료 화면/전체 화면) → completed 또는 failed를 반환한다. job에는 document_id, provider/model/config_version 스냅샷, prompt_version, result.requirement_count/condition_count, 안전한 error.code/message 및 토큰 사용량을 기록한다. 원문과 키는 이벤트에 넣지 않는다. 브라우저 재열기 후 같은 작업을 조회할 수 있다. 실패 결과는 채택하지 않고 검토를 자동 승인하지 않는다.
+
+이미 저장된 요구사항은 덮어쓰지 않으며 문서별 중복 실행은 409로 거부한다. 원문에 없는 인용·누락 요구사항·잘못된 범주·버전 변경은 failed로 남긴다. 원문 중 조건에 연결되지 않은 구절은 review_reasons에 남긴다. 새 초안과 completed 작업은 같은 DB 트랜잭션으로 저장한다.
+
+개발 서버 한 프로세스에서 직렬 백그라운드 실행한다. 서버 재시작 시 중단 작업은 failed/SERVER_RESTARTED로 기록하고 유료 요청을 자동 재호출하지 않는다. 내구성 큐·다중 프로세스 워커·취소/선택 재시도는 #52의 후속 범위다. 한 번에 최대 100화면/2000요구사항 원문/300000자, 화면당 출력 16000토큰·요청 시간 제한 120초·자동 재시도 없음이다. 일반 문단 PDF와 스캔 본문 전체 OCR은 이 실행 경로가 지원하지 않으며 원문 검토·수동 등록이 필요하다.
+
+
+### 웹 코드 검증 실행 연결 (2026-10-26)
+
+`POST /projects/{p}/verification-runs/prepare`는 실행 요청과 같은 `{snapshot_id,requirement_versions,model_config_version}`를 받아 부작용/모델 호출 없이 `{snapshot_id,stack,files,groups:[{key,title,source_screen_id,suggested_files}],requires_confirmation,warnings}`를 반환한다. 파일은 현재 스냅샷의 지원 진입 소스이며 테스트·의존성 잠금 파일은 구현 근거에서 제외한다. 샘플의 기존 검토 매핑은 추천으로만 사용하며 사용자가 실제 연결을 확인해야 한다.
+
+`POST /projects/{p}/verification-runs`는 기존 필드에 `scope_config:{stack:"spring"|"react",entries:{화면그룹키:[파일경로]},confirmed:true}`를 추가한다. 승인된 요구사항 개정, 코드 스냅샷, 서버 모델 연결이 필요하다. 모델 설정이 유효한 경우 누락 매핑은 409 SCREEN_ENTRY_REQUIRED, 잘못된 경로/화면은 422 SCREEN_ENTRY_INVALID다. 프로젝트 내 동시 검증 요청은 409 VERIFICATION_IN_PROGRESS다.
+
+queued → running(화면 범위/코드 매칭/조건 판정) → completed 또는 failed로 실행한다. 기존 selector가 전체 구현 소스에서 관련 청크를 선택하고, 사용자가 확인한 진입점의 정적 도달 범위로 this_screen/other_screen을 나눈 뒤 기존 pre_judge/judge/aggregate 및 ingest_verdict를 실행한다. target으로 후보를 미리 거르지 않는다. 키워드 유사도만으로 구현 여부를 만들지 않는다. 매칭·판정의 임시 숫자 ID는 해당 스냅샷의 실제 UUID·파일·줄 번호로 대응한다.
+
+구현됨/부분구현/불일치에는 이 화면에서 도달하는 실제 근거가 필요하다. 후보 밖 ID·다른 화면 근거만 있음·검증 이슈·미지원 TS 도달 분석은 검토 필요로 남긴다. 정적 검증 불가 조건은 승인된 verifiable 값을 따르고 LLM 구현 판정에 넣지 않는다. 미완료 행은 status:null/미분석으로 남으며 전송/인증 실패를 completed로 바꾸지 않는다. 완료된 이전 요구사항 결과는 실패한 실행에서도 고정 버전으로 보존한다.
+
+실행의 model_config_snapshot/provider/model/config_version, scope_config, prompt_version, rules_version과 진행 이벤트를 보존한다. 서버 재시작 시 중단 작업과 실행은 failed/SERVER_RESTARTED로 기록하며 유료 자동 재시도는 하지 않는다. 원문 키·제공자 원문 오류는 노출하지 않는다. 실제 모델에는 승인된 명세와 코드가 전달되며 프론트 시작 화면에 이를 안내한다.
+
+call_flow의 nodes/edges는 정적 참조 관계다. 노드 순서를 임의의 실행 순서로 표시하지 않으며 실제 런타임 호출 추적과 구분한다. 동적 호출·미지원 스택·규칙 기반 도달 분석의 한계는 경고로 표시한다. 내구성 워커/취소/선택 재시도는 #52의 후속 범위다. 구현 후보 한도는 5000청크·50만 문자다.

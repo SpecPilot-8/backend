@@ -1,5 +1,5 @@
 import json
-from typing import Annotated
+from typing import Annotated, Literal
 from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 from pydantic import Field, SecretStr
@@ -7,18 +7,24 @@ from sqlalchemy import select, update
 from api.errors import APIError
 from api.models import new_id, now
 from api.v2.common import Config, DB, Input, Limit, Offset, job_out, missing
-from api.v2.storage import ProjectRecord, all_resources, page, project, resource
+from api.v2.storage import ProjectRecord, all_resources, page, project, resource, create, replace
+from api.v2.server_llm import server_profile, settings_fingerprint, probe_connection, connection_state
 from services.workspace import workspace_path
 
 router = APIRouter(prefix='/api/v2', tags=['v2 프로젝트·모델·작업'])
 
 
+TechStack = Literal['auto', 'spring', 'react', 'typescript']
+
+
 class ProjectCreate(Input):
+    tech_stack: TechStack = 'auto'
     name: str = Field(min_length=1, max_length=200)
     workspace_path: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class ProjectEdit(Input):
+    tech_stack: TechStack | None = None
     base_version: int = Field(ge=1)
     name: str = Field(min_length=1, max_length=200)
 
@@ -40,7 +46,7 @@ class ConnectionCheck(Input):
 
 def project_out(value):
     return {'id': value.id, 'name': value.name, 'version': value.version,
-            'created_at': value.created_at, 'selected_model_profile_id': value.profile_id}
+            'tech_stack': value.tech_stack, 'created_at': value.created_at, 'selected_model_profile_id': value.profile_id}
 
 
 @router.get('/capabilities')
@@ -49,13 +55,13 @@ def capabilities(config: Config):
     return {'api_version': '2', 'export_profiles': [{'id': 'thinktree-test-spec-v1', 'sections': [{'key': k, 'sheet_name': v} for k, v in EXPORT_SECTIONS.items()]}], 'formats': [{'format': 'pdf', 'status': 'partial', 'limitations': ['ocr', 'layout_semantics']}], 'stacks': [{'name': 'Java/JavaScript/HTML', 'status': 'partial', 'limitations': ['call_flow', 'screen_reachability']}, {'name': 'TypeScript', 'status': 'partial', 'limitations': ['text_only']}],
             'limits': {'upload_bytes': config.max_upload_bytes, 'source_bytes': config.max_source_bytes,
                        'export_rows_per_sheet': config.max_export_rows, 'source_files': config.max_source_files, 'source_file_bytes': config.max_source_file_bytes},
-            'features': [{'code': 'projects', 'status': 'ready'}, {'code': 'jobs', 'status': 'ready'}, {'code': 'documents', 'status': 'partial'}, {'code': 'requirement_management', 'status': 'ready'}, {'code': 'requirement_extraction', 'status': 'not_implemented'}, {'code': 'code_snapshots', 'status': 'ready'}, {'code': 'verification_queries', 'status': 'ready'}, {'code': 'implementation_judgment', 'status': 'not_implemented'}, {'code': 'call_flow', 'status': 'not_implemented'}, {'code': 'test_procedures', 'status': 'ready'}, {'code': 'manual_executions', 'status': 'ready'}, {'code': 'atomic_table_save', 'status': 'ready'}, {'code': 'excel_exports', 'status': 'ready'}, {'code': 'test_case_generation', 'status': 'not_implemented'}],
-            'missing_features': missing('model_adapters', '팀원 모델 어댑터가 연결되지 않았습니다')}
+            'features': [{'code': 'projects', 'status': 'ready'}, {'code': 'jobs', 'status': 'ready'}, {'code': 'documents', 'status': 'partial'}, {'code': 'requirement_management', 'status': 'ready'}, {'code': 'requirement_extraction', 'status': 'partial', 'limitations': ['screen_table_pdf', 'source_review_required']}, {'code': 'code_snapshots', 'status': 'ready'}, {'code': 'verification_queries', 'status': 'ready'}, {'code': 'implementation_judgment', 'status': 'partial', 'limitations': ['confirmed_screen_entries_required', 'spring_react_scope']}, {'code': 'call_flow', 'status': 'partial', 'limitations': ['static_references_only']}, {'code': 'test_procedures', 'status': 'ready'}, {'code': 'manual_executions', 'status': 'ready'}, {'code': 'atomic_table_save', 'status': 'ready'}, {'code': 'excel_exports', 'status': 'ready'}, {'code': 'test_case_generation', 'status': 'partial', 'limitations': ['completed_verification_required', 'generated_draft_review_required']}],
+            'missing_features': []}
 
 
 @router.post('/projects', status_code=201)
 def create_project(body: ProjectCreate, db: DB, config: Config):
-    value = ProjectRecord(id=new_id(), name=body.name, version=1, config_version=0, created_at=now(),
+    value = ProjectRecord(id=new_id(), name=body.name, tech_stack=body.tech_stack, version=1, config_version=0, created_at=now(),
                           workspace_path=str(workspace_path(body.workspace_path, config)) if body.workspace_path else None)
     db.add(value)
     db.flush()
@@ -75,8 +81,11 @@ def get_project(p: str, db: DB):
 @router.patch('/projects/{p}')
 def edit_project(p: str, body: ProjectEdit, db: DB):
     value = project(db, p)
+    changes = {'name': body.name, 'version': body.base_version + 1}
+    if body.tech_stack is not None:
+        changes['tech_stack'] = body.tech_stack
     result = db.execute(update(ProjectRecord).where(ProjectRecord.id == p, ProjectRecord.version == body.base_version)
-                        .values(name=body.name, version=body.base_version + 1), execution_options={'synchronize_session': False})
+                        .values(**changes), execution_options={'synchronize_session': False})
     db.refresh(value)
     if result.rowcount != 1:
         raise APIError(409, 'VERSION_CONFLICT', '프로젝트 변경 버전이 충돌했습니다', details={'current_version': value.version})
@@ -84,17 +93,17 @@ def edit_project(p: str, body: ProjectEdit, db: DB):
 
 
 @router.get('/model-profiles')
-def profiles():
-    return {'items': [{'id': 'primary', 'provider': 'unconfigured', 'model': 'unconfigured',
-            'display_name': '기본 모델 (연결 대기)', 'adapter_status': 'not_connected', 'enabled': False,
-            'capabilities': ['requirement_extraction', 'implementation_judgment', 'test_generation'], 'credential_required': True}]}
+def profiles(config: Config):
+    return {'items': [server_profile(config)]}
 
 
 @router.get('/projects/{p}/llm')
-def model_settings(p: str, db: DB):
+def model_settings(p: str, db: DB, config: Config):
     value = project(db, p)
-    return {'profile_id': value.profile_id, 'config_version': value.config_version,
-            'credential_configured': False, 'connection_status': 'not_connected'}
+    return {'profile_id': value.profile_id or 'primary', 'config_version': value.config_version,
+            'credential_configured': server_profile(config)['enabled'], 'config_source': 'server_env',
+            'connection_status': connection_state(db, p, value.config_version, config),
+            'provider': config.llm_provider, 'model': config.llm_model}
 
 
 @router.post('/projects/{p}/credentials', status_code=201)
@@ -104,20 +113,45 @@ def credentials(p: str, body: CredentialCreate, db: DB):
 
 
 @router.put('/projects/{p}/llm')
-def set_model(p: str, body: ModelSetting, db: DB):
+def set_model(p: str, body: ModelSetting, db: DB, config: Config):
     value = project(db, p)
-    if value.config_version != body.base_version:
+    if body.profile_id != 'primary' or body.credential_ref is not None:
+        raise APIError(422, 'SERVER_MODEL_ONLY', '현재는 서버에 설정된 모델과 API 키만 사용합니다')
+    if not server_profile(config)['enabled']:
+        raise APIError(409, 'LLM_NOT_CONFIGURED', '백엔드의 제공업체·모델·API 키 환경변수를 확인하세요')
+    result = db.execute(update(ProjectRecord).where(ProjectRecord.id == p, ProjectRecord.config_version == body.base_version)
+                        .values(profile_id='primary', config_version=body.base_version + 1),
+                        execution_options={'synchronize_session': False})
+    db.refresh(value)
+    if result.rowcount != 1:
         raise APIError(409, 'CONFIG_CHANGED', '모델 설정 버전이 변경되었습니다', details={'current_version': value.config_version})
-    if body.profile_id != 'primary':
-        raise APIError(422, 'VALIDATION_ERROR', '지원 목록에 없는 모델입니다')
-    raise APIError(501, 'FEATURE_NOT_IMPLEMENTED', '실제 모델 어댑터 연결이 필요합니다', missing('model_adapter', '선정된 단일 모델 어댑터가 필요합니다'))
+    return {'profile_id': 'primary', 'config_version': value.config_version, 'config_source': 'server_env',
+            'provider': config.llm_provider, 'model': config.llm_model}
 
 
 @router.post('/projects/{p}/llm/connection-check')
-def connection(p: str, body: ConnectionCheck, db: DB):
-    if project(db, p).config_version != body.config_version:
+def connection(p: str, body: ConnectionCheck, db: DB, config: Config):
+    value = project(db, p)
+    if value.config_version != body.config_version:
         raise APIError(409, 'CONFIG_CHANGED', '모델 설정 버전이 변경되었습니다')
-    raise APIError(501, 'FEATURE_NOT_IMPLEMENTED', '실제 연결 검사는 아직 지원하지 않습니다', missing('model_connection_check', '실제 제공자 호출 어댑터가 필요합니다'))
+    if value.profile_id != 'primary':
+        raise APIError(409, 'MODEL_NOT_SELECTED', '프로젝트에 서버 모델 설정을 먼저 적용하세요')
+    check = create(db, p, 'llm_connection', {'fingerprint': settings_fingerprint(config),
+                   'config_version': value.config_version, 'checked_at': None, 'status': 'checking'})
+    # 네트워크 대기 중 DB 쓰기 잠금을 잡지 않고 이전 성공도 먼저 무효화한다.
+    db.commit()
+    try:
+        result = probe_connection(config)
+    except APIError as error:
+        replace(db, check, {**check.data, 'status': 'failed', 'error_code': error.code})
+        db.commit()
+        raise
+    # 실제 요청 중 다른 설정이 저장되면 이전 요청의 성공을 새 설정에 적용하지 않는다.
+    db.refresh(value)
+    if value.config_version != body.config_version:
+        raise APIError(409, 'CONFIG_CHANGED', '연결 확인 중 모델 설정이 변경되었습니다')
+    replace(db, check, {**check.data, 'checked_at': result['checked_at'], 'status': 'connected'})
+    return {**result, 'config_version': value.config_version}
 
 
 @router.get('/projects/{p}/jobs')
@@ -129,6 +163,31 @@ def jobs(p: str, db: DB, status: str | None = None, limit: Limit = 50, offset: O
 
 @router.get('/projects/{p}/jobs/{j}')
 def job(p: str, j: str, db: DB):
+    return job_out(resource(db, p, j, 'job'))
+
+
+@router.post('/projects/{p}/jobs/{j}/cancel')
+def cancel_job(p: str, j: str, db: DB):
+    item = resource(db, p, j, 'job')
+    if item.data['status'] not in ('queued', 'running'):
+        raise APIError(409, 'JOB_NOT_RUNNING', f"이미 종료된 작업은 중단할 수 없습니다 (현재 상태: {item.data['status']})")
+
+    from api.v2.extraction_runner import transition_job
+    error_payload = {'code': 'JOB_CANCELLED', 'message': '사용자에 의해 작업이 중단되었습니다'}
+    transition_job(db, item, 'cancelled', error=error_payload)
+
+    ref = item.data.get('result_ref')
+    if ref and ref.get('id'):
+        if ref.get('kind') == 'verification_run':
+            run_res = resource(db, p, ref['id'], 'verification_run')
+            if run_res.data['status'] in ('queued', 'running'):
+                replace(db, run_res, {**run_res.data, 'status': 'cancelled', 'error': error_payload})
+        elif ref.get('kind') == 'test_specification':
+            spec_res = resource(db, p, ref['id'], 'test_specification')
+            if spec_res.data.get('generation_status') in ('queued', 'running'):
+                replace(db, spec_res, {**spec_res.data, 'status': 'failed', 'generation_status': 'cancelled', 'error': error_payload})
+
+    db.commit()
     return job_out(resource(db, p, j, 'job'))
 
 

@@ -14,10 +14,16 @@ _MAX_TOKENS = 32000
 
 
 class AnthropicClient:
-    def __init__(self, model: str, effort: str = "high"):
+    def __init__(self, model: str, effort: str = "high", *, api_key: str | None = None,
+                 max_tokens: int = _MAX_TOKENS, timeout_seconds: float = 300, max_retries: int = 2,
+                 base_url: str | None = None):
         self.model = model
         self.effort = effort
-        self._client = anthropic.Anthropic()
+        self._max_tokens = max_tokens
+        self._client = anthropic.Anthropic(api_key=api_key, timeout=timeout_seconds, max_retries=max_retries, base_url=base_url)
+
+    def close(self):
+        self._client.close()
 
     @staticmethod
     def _system(instructions: str, context: str) -> list[dict]:
@@ -31,7 +37,7 @@ class AnthropicClient:
     def complete_json(self, *, instructions: str, context: str, prompt: str, schema: dict) -> LLMResponse:
         with self._client.messages.stream(
             model=self.model,
-            max_tokens=_MAX_TOKENS,
+            max_tokens=self._max_tokens,
             system=self._system(instructions, context),
             messages=[{"role": "user", "content": prompt}],
             output_config={
