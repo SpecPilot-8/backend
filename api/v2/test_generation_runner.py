@@ -216,13 +216,16 @@ def run_generation(database, p, spec_id, config):
 
             def progress(done, total, used):
                 with database.session() as db:
+                    job = resource(db, p, job_id, "job")
+                    if job.data.get("status") == "cancelled":
+                        raise APIError(409, "JOB_CANCELLED", "테스트케이스 생성이 중단되었습니다")
                     if project(db, p).config_version != version:
                         raise APIError(
                             409, "CONFIG_CHANGED", "생성 중 모델 설정이 변경되어 남은 호출을 중단했습니다"
                         )
                     transition_job(
                         db,
-                        resource(db, p, job_id, "job"),
+                        job,
                         "running",
                         progress={"stage": "test_generation", "completed": done, "total": total},
                         usage=dict(used),
@@ -274,6 +277,8 @@ def run_generation(database, p, spec_id, config):
                     missing_features=[],
                 )
         except APIError as error:
+            if error.code == "JOB_CANCELLED":
+                return
             failure = {"code": error.code, "message": error.message}
             if error.details.get("validation_issues"):
                 failure["validation_issues"] = error.details["validation_issues"]

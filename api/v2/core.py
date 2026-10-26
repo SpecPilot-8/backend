@@ -177,10 +177,15 @@ def cancel_job(p: str, j: str, db: DB):
     transition_job(db, item, 'cancelled', error=error_payload)
 
     ref = item.data.get('result_ref')
-    if ref and ref.get('kind') == 'verification_run' and ref.get('id'):
-        run_res = resource(db, p, ref['id'], 'verification_run')
-        if run_res.data['status'] in ('queued', 'running'):
-            replace(db, run_res, {**run_res.data, 'status': 'cancelled', 'error': error_payload})
+    if ref and ref.get('id'):
+        if ref.get('kind') == 'verification_run':
+            run_res = resource(db, p, ref['id'], 'verification_run')
+            if run_res.data['status'] in ('queued', 'running'):
+                replace(db, run_res, {**run_res.data, 'status': 'cancelled', 'error': error_payload})
+        elif ref.get('kind') == 'test_specification':
+            spec_res = resource(db, p, ref['id'], 'test_specification')
+            if spec_res.data.get('generation_status') in ('queued', 'running'):
+                replace(db, spec_res, {**spec_res.data, 'status': 'failed', 'generation_status': 'cancelled', 'error': error_payload})
 
     db.commit()
     return job_out(resource(db, p, j, 'job'))
