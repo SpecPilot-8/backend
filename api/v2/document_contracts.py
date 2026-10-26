@@ -5,7 +5,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from api.errors import APIError
 
-_SCHEMA = json.loads((Path(__file__).resolve().parents[2] / 'docs/schemas/requirement-extraction.schema.json').read_text(encoding='utf-8'))
+_SCHEMA = json.loads((Path(__file__).resolve().parents[2] / 'docs/schemas/requirement-extraction.schema.json').read_text())
 _VALIDATOR = Draft202012Validator(_SCHEMA)
 
 
