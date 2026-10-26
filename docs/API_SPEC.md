@@ -127,7 +127,7 @@ source_screen_id는 원문 화면 번호이며 시험번호(test_no)와 서버 D
 
 `p`는 project_id다. 아래 모든 p도 동일하다. v2 Project 생성에서 workspace_path는 로컬 경로 방식일 때만 필요하다.
 
-현재 테스트 모드는 **서버 환경변수 고정 모델**을 사용한다. `GET /model-profiles`는 `primary` 하나에 실제 provider/model과 `credential_source:"server_env"`, `credential_required:false`, `credential_configured`, `enabled`를 반환한다. `enabled`는 서버 설정 유효성만 뜻하며 실제 연결 성공은 아니다. 현재 capabilities는 `connection_check`만 보장하고 웹 AI 분석 실행은 별도 미연결이다.
+현재 테스트 모드는 **서버 환경변수 고정 모델**을 사용한다. `GET /model-profiles`는 `primary` 하나에 실제 provider/model과 `credential_source:"server_env"`, `credential_required:false`, `credential_configured`, `enabled`를 반환한다. `enabled`는 서버 설정 유효성만 뜻하며 실제 연결 성공은 아니다. 현재 capabilities는 `connection_check`, `requirement_extraction`을 제공한다. 요구사항 추출은 화면 표 PDF와 원문 검토가 필요한 부분 지원이다. 웹 코드 판정·시험 생성은 별도 미연결이다.
 
 `PUT /projects/{p}/llm`은 `{base_version,profile_id:"primary",credential_ref:null}`로 서버 모델을 프로젝트에 적용하고 config_version을 증가시킨다. 다른 프로필이나 키 참조는 422 `SERVER_MODEL_ONLY`, 미설정은 409 `LLM_NOT_CONFIGURED`, 버전 충돌은 409 `CONFIG_CHANGED`다. 키 저장 API는 계속 501이며 브라우저는 호출하지 않는다.
 
@@ -576,3 +576,16 @@ SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/
 ### AI와 독립적인 수동 사양서 생성
 
 `POST /api/v2/projects/{p}/test-specifications`는 `verification_run_id`, `requirement_ids`를 받으며 201로 빈 수동 사양서를 반환한다. 실행에 고정된 승인 요구사항만 선택할 수 있다. 실행이 blocked여도 수동 사양서의 `status=draft`, `origin=manual`로 등록하며 판정이나 시험을 생성하지 않는다. 기존 generate API의 차단 상태는 바꾸지 않는다. 이후 POST test-cases와 edit-batches로 사용자가 시험을 작성·저장한다.
+
+
+### 화면 표 PDF의 웹 요구사항 추출 실행
+
+`POST /projects/{p}/documents/{d}/parse`는 `{document_revision,force?:false}`를 받는다. force는 저장된 요구사항이나 진행 중 추출이 없을 때만 원문 블록을 교체한다. 한국어 OCR 데이터 누락 시 영문 대체 인식을 사용하지 않는다. `pdf-layout-2` 파서의 한국어 설정은 [OCR_SETUP.md](OCR_SETUP.md)를 따른다.
+
+`POST /projects/{p}/documents/{d}/requirements/extract`는 서버 모델의 실제 연결 확인과 최신 파싱 결과를 요구한다. partial 문서는 사용자가 경고를 확인한 뒤 `accept_warnings:true`로 요청한다. queued 작업을 202로 반환하고 화면별로 기존 조건 분해기를 실행해 범주·인용을 검증한 v2 초안을 저장한다. PostgreSQL 파이프라인 테이블은 필요하지 않다.
+
+작업 조회/SSE는 queued → running(완료 화면/전체 화면) → completed 또는 failed를 반환한다. job에는 document_id, provider/model/config_version 스냅샷, prompt_version, result.requirement_count/condition_count, 안전한 error.code/message 및 토큰 사용량을 기록한다. 원문과 키는 이벤트에 넣지 않는다. 브라우저 재열기 후 같은 작업을 조회할 수 있다. 실패 결과는 채택하지 않고 검토를 자동 승인하지 않는다.
+
+이미 저장된 요구사항은 덮어쓰지 않으며 문서별 중복 실행은 409로 거부한다. 원문에 없는 인용·누락 요구사항·잘못된 범주·버전 변경은 failed로 남긴다. 원문 중 조건에 연결되지 않은 구절은 review_reasons에 남긴다. 새 초안과 completed 작업은 같은 DB 트랜잭션으로 저장한다.
+
+개발 서버 한 프로세스에서 직렬 백그라운드 실행한다. 서버 재시작 시 중단 작업은 failed/SERVER_RESTARTED로 기록하고 유료 요청을 자동 재호출하지 않는다. 내구성 큐·다중 프로세스 워커·취소/선택 재시도는 #52의 후속 범위다. 한 번에 최대 100화면/2000요구사항 원문/300000자, 화면당 출력 16000토큰·요청 시간 제한 120초·자동 재시도 없음이다. 일반 문단 PDF와 스캔 본문 전체 OCR은 이 실행 경로가 지원하지 않으며 원문 검토·수동 등록이 필요하다.

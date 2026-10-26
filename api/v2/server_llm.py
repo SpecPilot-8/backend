@@ -34,9 +34,9 @@ def server_profile(config):
     enabled = bool(supported and model_valid and key_valid)
     return {'id': 'primary', 'provider': config.llm_provider, 'model': config.llm_model,
             'display_name': f'{config.llm_model} (서버 설정)', 'adapter_status': 'configured' if enabled else 'not_configured',
-            'enabled': enabled, 'capabilities': ['connection_check'],
+            'enabled': enabled, 'capabilities': ['connection_check', 'requirement_extraction'],
             'credential_required': False, 'credential_source': 'server_env', 'credential_configured': key_valid,
-            'limitations': ['web_requirement_extraction', 'web_implementation_judgment', 'web_test_generation']}
+            'limitations': ['web_implementation_judgment', 'web_test_generation']}
 
 
 def settings_fingerprint(config):
