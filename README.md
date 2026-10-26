@@ -92,10 +92,13 @@ createdb specpilot
 psql -d specpilot -f db/schema.sql
 ```
 
-LLM을 쓰는 단계(3, 5, 6)는 API 키가 필요하다. `.env`는 `.gitignore`에 들어 있어 커밋되지 않는다.
+LLM을 쓰는 단계(3, 5, 6 및 시험 자동 생성)는 API 키가 필요하다. `.env`는 `.gitignore`에 들어 있어 커밋되지 않는다.
+Vercel AI Gateway로 여러 제공자의 모델을 선택할 때는 [Gateway 설정·실제 연결 진단](docs/VERCEL_GATEWAY_SETUP.md)을 따른다. 기존 CLI의 공통 호출 규격을 사용하며 FastAPI 자동 작업 실행까지 연결된 것은 아니다.
 
 ```bash
-echo 'ANTHROPIC_API_KEY=<키>' > .env
+# 기존 .env가 있으면 덮어쓰지 않고 아래 항목을 편집기로 추가한다.
+# Anthropic 직접 호출 설정 예시:
+# ANTHROPIC_API_KEY=발급받은_키
 # 선택: SPECPILOT_LLM_PROVIDER=anthropic, SPECPILOT_LLM_MODEL=claude-opus-5 (비우면 이 기본값)
 ```
 
