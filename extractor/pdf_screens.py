@@ -15,6 +15,9 @@ OCR로 복구한다"는 일반 규칙으로 처리한다 (claude.md 원칙3과 �
 from __future__ import annotations
 
 import re
+import os
+import shlex
+from pathlib import Path
 from dataclasses import dataclass
 
 import pymupdf
@@ -90,9 +93,26 @@ def _ocr_cell(page: pymupdf.Page, rect: pymupdf.Rect, lang: str = "kor+eng") -> 
     """셀 영역을 크롭해 OCR. (텍스트, 0~100 신뢰도) 반환."""
     pix = page.get_pixmap(clip=rect, matrix=pymupdf.Matrix(12, 12))
     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    # Tesseract는 kor 데이터가 없어도 영문 인식을 계속할 수 있다. 한글을 영문처럼
+    # 읽은 결과를 정상 헤더로 저장하지 않도록 필요한 언어 데이터를 먼저 확인한다.
+    data_dir = os.getenv('TESSDATA_PREFIX')
+    bundled = Path(__file__).resolve().parents[1] / '.data' / 'tessdata'
+    if not data_dir and (bundled / 'kor.traineddata').is_file():
+        data_dir = str(bundled)
+    config = '--psm 7'
+    if data_dir:
+        if not all((Path(data_dir) / f'{name}.traineddata').is_file() for name in lang.split('+')):
+            return '', 0.0
+        config += ' --tessdata-dir ' + shlex.quote(data_dir)
+    else:
+        try:
+            if not set(lang.split('+')) <= set(pytesseract.get_languages(config='')):
+                return '', 0.0
+        except (pytesseract.TesseractError, pytesseract.TesseractNotFoundError):
+            return '', 0.0
     try:
         data = pytesseract.image_to_data(
-            img, lang=lang, config="--psm 7", output_type=pytesseract.Output.DICT,
+            img, lang=lang, config=config, output_type=pytesseract.Output.DICT,
             timeout=5,
         )
     except (pytesseract.TesseractError, pytesseract.TesseractNotFoundError, RuntimeError):
