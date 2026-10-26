@@ -101,8 +101,8 @@ def test_bad_upload_and_scan_not_success(client, v2_project):
 
 def test_teammate_output_validated_before_storage(client, v2_project):
     examples = Path(__file__).resolve().parents[1] / 'docs/examples'
-    artifact = json.loads((examples / 'document-artifact.json').read_text())
-    draft = json.loads((examples / 'requirement-extraction.json').read_text())
+    artifact = json.loads((examples / 'document-artifact.json').read_text(encoding='utf-8'))
+    draft = json.loads((examples / 'requirement-extraction.json').read_text(encoding='utf-8'))
     with client.app.state.database.session() as db:
         doc = create(db, v2_project, 'document', {'revision': 1, 'blocks': artifact['blocks'], 'parse_status': 'parsed'})
         draft['document_id'] = doc.id
