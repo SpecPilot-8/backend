@@ -50,6 +50,8 @@ def linked(config, monkeypatch):
                     ids = [99999]
                 if control.mode == "empty" and key == "main-rule":
                     ids = []
+                if control.mode == "outside-extra" and key == "main-rule":
+                    ids.append(by_file["src/unrelated.js"])
                 matches.append({"requirement_key": key, "chunk_ids": ids})
             data = {"matches": matches}
         else:
@@ -149,6 +151,7 @@ def linked(config, monkeypatch):
                 'export const fakeImplementation = "test-only-should-never-match";',
             )
             z.writestr("uploaded/application.yml", "title-limit: 50")
+            z.writestr("uploaded/src/unrelated.js", "export function unusedScreen() { return false; }")
             z.writestr("uploaded/package-lock.json", "lock-file-not-implementation")
             z.writestr("uploaded/schema.sql", "CREATE TABLE notices (title VARCHAR(50));")
         source = c.post(base + "/code/sources", files={"file": ("src.zip", out.getvalue())}).json()[
@@ -203,7 +206,13 @@ def test_real_modules_are_called_and_scope_is_not_target_filter(linked):
 
 
 @pytest.mark.parametrize(
-    "mode,expected", [("bad-match", "needs_review"), ("foreign", "needs_review"), ("empty", "not_found")]
+    "mode,expected",
+    [
+        ("bad-match", "needs_review"),
+        ("foreign", "needs_review"),
+        ("empty", "not_found"),
+        ("outside-extra", "mismatch"),
+    ],
 )
 def test_invalid_or_other_screen_code_cannot_become_implemented(linked, mode, expected):
     c, p, reqs, _, control, _, _ = linked
