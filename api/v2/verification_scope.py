@@ -48,6 +48,80 @@ def screen_groups(db, p, requirements):
     return list(groups.values())
 
 
+KO_EN_MAP = {
+    '로그인': ['login', 'auth', 'sign_in', 'signin', 'session'],
+    '로그아웃': ['logout', 'sign_out', 'signout'],
+    '회원가입': ['signup', 'register', 'join', 'user'],
+    '사용자': ['user', 'member', 'account'],
+    '주문': ['order', 'checkout', 'purchase'],
+    '장바구니': ['cart', 'basket'],
+    '상품': ['item', 'product', 'goods'],
+    '결제': ['pay', 'payment', 'billing'],
+    '게시판': ['board', 'post', 'article'],
+    '목록': ['list', 'index'],
+    '상세': ['detail', 'view'],
+    '관리자': ['admin', 'manager'],
+    '설정': ['setting', 'config', 'setup'],
+    '검색': ['search', 'query', 'filter'],
+    '대시보드': ['dashboard', 'home', 'main'],
+}
+
+
+def infer_suggested_files(group, entry_files, stack):
+    """화면/소주제 정보와 소스 파일 목록을 바탕으로 연관 진입 파일을 자동 추론한다."""
+    if not entry_files:
+        return []
+    title_terms = [t.lower() for t in (group.get('title') or '').replace('/', ' ').replace('-', ' ').split() if len(t) >= 2]
+    screen_id = (group.get('source_screen_id') or '').lower()
+    if screen_id:
+        title_terms.extend([t for t in screen_id.replace('-', ' ').replace('_', ' ').split() if len(t) >= 2])
+
+    expanded_terms = set(title_terms)
+    for term in title_terms:
+        for ko, en_list in KO_EN_MAP.items():
+            if ko in term:
+                expanded_terms.update(en_list)
+
+    scored = []
+    for file in entry_files:
+        name_lower = PurePosixPath(file).stem.lower()
+        path_lower = file.lower()
+        score = 0
+        for term in expanded_terms:
+            if term in name_lower:
+                score += 10
+            elif term in path_lower:
+                score += 3
+        if stack == 'spring':
+            if 'controller' in name_lower:
+                score += 5
+            elif any(ext in file for ext in ('.html', '.jsp', '.jspf')):
+                score += 2
+        elif stack == 'react':
+            if any(name_lower.endswith(s) for s in ('view', 'page', 'screen', 'container')):
+                score += 5
+            elif 'app' in name_lower or 'router' in name_lower or 'routes' in name_lower:
+                score += 3
+        if score > 0:
+            scored.append((score, file))
+
+    scored.sort(key=lambda x: -x[0])
+    if scored:
+        return [f for _, f in scored[:3]]
+
+    fallback = []
+    for file in entry_files:
+        name_lower = PurePosixPath(file).stem.lower()
+        if stack == 'spring' and 'controller' in name_lower:
+            fallback.append(file)
+        elif stack == 'react' and name_lower in ('app', 'index', 'main', 'routes', 'router'):
+            fallback.append(file)
+    if fallback:
+        return fallback[:2]
+
+    return entry_files[:1]
+
+
 def scope_options(db, p, snapshot, requirements, hint='auto'):
     files = sorted(f for f in snapshot.data['files'] if production_file(f))
     prefix = wrapper_prefix(files)
@@ -62,12 +136,14 @@ def scope_options(db, p, snapshot, requirements, hint='auto'):
     if stack:
         source = Path(__file__).resolve().parents[2] / 'matcher' / 'scope' / 'entries' / f'{stack}-sample.json'
         presets = json.loads(source.read_text())
+    entry_files = [f for f in files if PurePosixPath(f).suffix.lower() in ('.java', '.js', '.jsx', '.html', '.htm', '.ts', '.tsx')]
     for group in groups:
         entries = saved.get('entries', {}).get(group['key'], [])
         if not entries:
             entries = [normalized[f] for f in presets.get(group['source_screen_id'], []) if f in normalized]
+        if not entries:
+            entries = infer_suggested_files(group, entry_files, stack)
         group['suggested_files'] = [f for f in entries if f in files]
-    entry_files = [f for f in files if PurePosixPath(f).suffix.lower() in ('.java', '.js', '.jsx', '.html', '.htm', '.ts', '.tsx')]
     return {'snapshot_id': snapshot.id, 'stack': saved.get('stack', stack), 'files': entry_files, 'groups': groups,
             'requires_confirmation': True, 'requirement_count': len(requirements),
             'max_model_calls': len(groups) + len(requirements), 'warnings': [

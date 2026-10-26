@@ -301,3 +301,18 @@ def test_cached_usage_is_recorded_separately_from_uncached_input():
         "cache_read_input_tokens": 20,
         "cache_creation_input_tokens": 30,
     }
+
+
+def test_infer_suggested_files_matches_keywords_and_fallbacks():
+    from api.v2.verification_scope import infer_suggested_files
+    files = ["src/views/LoginView.tsx", "src/views/OrderView.tsx", "src/App.tsx"]
+    # 1. 로그인 키워드 매칭
+    matched = infer_suggested_files({"title": "로그인 / 회원가입"}, files, "react")
+    assert "src/views/LoginView.tsx" in matched
+    # 2. 주문 키워드 매칭
+    matched_order = infer_suggested_files({"title": "주문 결제"}, files, "react")
+    assert "src/views/OrderView.tsx" in matched_order
+    # 3. 매칭 없는 경우 fallback
+    matched_unknown = infer_suggested_files({"title": "기타 미정 화면"}, files, "react")
+    assert len(matched_unknown) > 0
+
