@@ -53,7 +53,7 @@ def prepare_groups(run, selected):
 
 class GenerationClient:
     def __init__(self, client, api_key):
-        self.client, self.api_key, self.data = client, api_key, None
+        self.client, self.api_key, self.data, self.usage = client, api_key, None, {}
 
     def complete_json(self, **kwargs):
         schema = deepcopy(kwargs["schema"])
@@ -66,7 +66,7 @@ class GenerationClient:
         step = item["steps"]["items"]["properties"]
         for key, maximum in [("action", 5000), ("expected", 10000)]:
             step[key].update(minLength=1, maxLength=maximum, pattern=r"\S")
-        step["condition_keys"].update(minItems=1, uniqueItems=True)
+        step["condition_keys"].update(uniqueItems=True)
         # 제공자의 지원 범위는 기본 구조/조건 enum으로 제한하고 길이·개수·중복은 로컬에서 강제한다.
         try:
             response = self.client.complete_json(
@@ -95,9 +95,18 @@ class GenerationClient:
             )
         if response.error:
             fail(response.error)
-        if not Draft202012Validator(schema).is_valid(response.data):
+        add_usage(self.usage, response.usage)
+        errors = list(Draft202012Validator(schema).iter_errors(response.data))
+        if errors:
             raise APIError(
-                422, "MODEL_OUTPUT_INVALID", "생성된 시험의 단계·조건 연결·출력 형식이 유효하지 않습니다"
+                422,
+                "MODEL_OUTPUT_INVALID",
+                "생성된 시험의 단계·조건 연결·출력 형식이 유효하지 않습니다",
+                details={
+                    "validation_issues": [
+                        {"path": list(e.absolute_path), "rule": e.validator} for e in errors[:10]
+                    ]
+                },
             )
         if self.api_key and self.api_key in json.dumps(response.data):
             raise APIError(502, "LLM_INVALID_RESPONSE", "정상 모델 응답을 확인하지 못했습니다")
@@ -136,7 +145,12 @@ def generate_draft(run, groups, client, api_key, model, progress):
             json.dumps([PROMPT_VERSION, RULES_VERSION, input_hash(model, title, spec_reqs)]).encode()
         ).hexdigest()
         wrapper = GenerationClient(client, api_key)
-        generated = generate(wrapper, title, spec_reqs)
+        try:
+            generated = generate(wrapper, title, spec_reqs)
+        except APIError as error:
+            add_usage(usage, wrapper.usage)
+            error.details = {**error.details, "usage": dict(usage)}
+            raise
         add_usage(usage, generated["usage"])
         # 소주제의 조건만 변환한다. 원문 키가 다른 소주제와 섞이지 않는다.
         part = build_test_generation({**run, "requirements": requirements}, sub_id, sub_id, generated)
@@ -260,7 +274,10 @@ def run_generation(database, p, spec_id, config):
                     missing_features=[],
                 )
         except APIError as error:
-            mark_failed(database, p, spec_id, job_id, {"code": error.code, "message": error.message})
+            failure = {"code": error.code, "message": error.message}
+            if error.details.get("validation_issues"):
+                failure["validation_issues"] = error.details["validation_issues"]
+            mark_failed(database, p, spec_id, job_id, failure, error.details.get("usage"))
         except Exception:
             mark_failed(
                 database,
@@ -277,8 +294,15 @@ def run_generation(database, p, spec_id, config):
                 client.close()
 
 
-def mark_failed(database, p, spec_id, job_id, failure):
+def mark_failed(database, p, spec_id, job_id, failure, usage=None):
     with database.session() as db:
         spec = resource(db, p, spec_id, "test_specification")
         spec.data = {**spec.data, "status": "failed", "generation_status": "failed", "error": failure}
-        transition_job(db, resource(db, p, job_id, "job"), "failed", error=failure, missing_features=[])
+        transition_job(
+            db,
+            resource(db, p, job_id, "job"),
+            "failed",
+            error=failure,
+            missing_features=[],
+            **({"usage": usage} if usage else {}),
+        )

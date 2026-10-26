@@ -56,6 +56,18 @@ def generation(linked, monkeypatch):
         }
         if control.mode == "foreign-key":
             data["scenarios"][0]["steps"][0]["condition_keys"] = ["invented-key"]
+        if control.mode == "unlinked-setup":
+            data["scenarios"][0]["steps"].insert(
+                0,
+                {
+                    "action": "시험 환경 준비",
+                    "expected": "준비 완료",
+                    "account": None,
+                    "input": "",
+                    "notes": "",
+                    "condition_keys": [],
+                },
+            )
         if control.mode == "actual":
             data["scenarios"][0]["steps"][0]["actual"] = "AI가 통과했다고 생성"
         if control.mode == "empty":
@@ -150,6 +162,14 @@ def test_empty_output_preserves_uncovered_conditions_without_fake_cases(generati
     _, job, spec = start(generation)
     assert job["status"] == "completed" and job["result"]["test_case_count"] == 0
     assert len(spec["uncovered_conditions"]) == 3 and spec["warnings"][-1]["code"] == "NO_TEST_CANDIDATES"
+
+
+def test_unlinked_preparation_step_is_reported_without_inventing_condition_link(generation):
+    _, _, _, control, *_ = generation
+    control.mode = "unlinked-setup"
+    _, job, spec = start(generation)
+    assert job["status"] == "completed" and job["result"]["step_count"] == 3
+    assert [w["code"] for w in spec["warnings"]] == ["STEP_WITHOUT_CONDITION", "STEP_WITHOUT_CONDITION"]
 
 
 def test_provider_sdk_rejection_is_safe_and_does_not_retry(generation, monkeypatch):
