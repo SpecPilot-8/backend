@@ -14,7 +14,7 @@ from api.v2.common import Config, DB, Input, Limit, Offset, make_job
 from api.v2.storage import all_resources, create, page, project, public, resource
 
 router = APIRouter(prefix='/api/v2/projects/{p}/code', tags=['v2 코드 스냅샷'])
-EXTENSIONS = {'.java', '.js', '.jsx', '.html', '.htm', '.css', '.json', '.yaml', '.yml', '.properties', '.xml', '.ts', '.tsx'}
+EXTENSIONS = {'.java', '.js', '.jsx', '.html', '.htm', '.css', '.json', '.yaml', '.yml', '.properties', '.xml', '.ts', '.tsx', '.sql'}
 IGNORED = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', 'target', 'build', 'dist', '__MACOSX', '.AppleDouble'}
 _PARSER_LOCK = Lock()
 
@@ -161,7 +161,7 @@ def index(p: str, body: IndexRequest, db: DB, config: Config):
     existing = next((s for s in all_resources(db, p, 'snapshot') if s.data['content_hash'] == content_hash), None)
     if existing:
         return make_job(db, p, 'index_code', body.model_dump(), result_ref={'kind': 'snapshot', 'id': existing.id})
-    warnings = [{'code': 'SOURCE_FILTER', 'message': '지원 소스 파일 전체를 인덱싱합니다. 미지원 파일, macOS 메타데이터, .git/node_modules/빌드 폴더는 제외됩니다'}, {'code': 'CALL_SCOPE_NOT_CONNECTED', 'message': '청킹은 완료되었으며 호출/화면 도달 범위 분석 어댑터는 미연결입니다'}]
+    warnings = [{'code': 'SOURCE_FILTER', 'message': '지원 소스 파일 전체를 인덱싱합니다. 미지원 파일, macOS 메타데이터, .git/node_modules/빌드 폴더는 제외됩니다'}, {'code': 'CALL_SCOPE_AT_VERIFICATION', 'message': '청킹을 완료했습니다. 검증 단계에서 화면 진입 파일을 확인하면 정적 도달 범위를 분석합니다'}]
     if any(Path(path).suffix.lower() in ('.ts', '.tsx') for path in files):
         warnings.append({'code': 'TYPESCRIPT_TEXT_ONLY', 'message': 'TypeScript는 원문 청크만 제공하며 의미 파서는 미지원입니다'})
     snapshot = create(db, p, 'snapshot', {'content_hash': content_hash, 'status': 'ready', 'source_kind': kind,
