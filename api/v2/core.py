@@ -1,17 +1,20 @@
 import json
+import logging
+from pathlib import Path
 from typing import Annotated, Literal
 from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 from pydantic import Field, SecretStr
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from api.errors import APIError
 from api.models import new_id, now
 from api.v2.common import Config, DB, Input, Limit, Offset, job_out, missing
-from api.v2.storage import ProjectRecord, all_resources, page, project, resource, create, replace
+from api.v2.storage import ProjectRecord, Resource, Revision, SavedRequest, all_resources, page, project, resource, create, replace
 from api.v2.server_llm import server_profile, settings_fingerprint, probe_connection, connection_state
 from services.workspace import workspace_path
 
 router = APIRouter(prefix='/api/v2', tags=['v2 프로젝트·모델·작업'])
+logger = logging.getLogger(__name__)
 
 
 TechStack = Literal['auto', 'spring', 'react', 'typescript']
@@ -90,6 +93,38 @@ def edit_project(p: str, body: ProjectEdit, db: DB):
     if result.rowcount != 1:
         raise APIError(409, 'VERSION_CONFLICT', '프로젝트 변경 버전이 충돌했습니다', details={'current_version': value.version})
     return project_out(value)
+
+
+def delete_project_files(paths, config):
+    """DB 커밋 이후 호출한다. 서버가 만든 uploads/artifacts 하위 파일만 지우며 실패는 로그만 남긴다."""
+    allowed = [(config.data_dir / 'uploads').resolve(), (config.data_dir / 'artifacts').resolve()]
+    for raw in paths:
+        try:
+            target = Path(raw).resolve()
+            if not any(target.is_relative_to(root) for root in allowed):
+                logger.warning('프로젝트 삭제: 허용 경로 밖의 파일은 삭제하지 않습니다 (%s)', raw)
+                continue
+            target.unlink(missing_ok=True)
+        except Exception:
+            logger.warning('프로젝트 삭제: 파일 삭제에 실패했습니다 (%s)', raw, exc_info=True)
+
+
+@router.delete('/projects/{p}', status_code=204)
+def delete_project(p: str, db: DB, config: Config):
+    from api.v2.testing import lock_project
+    lock_project(db, p)  # 존재하지 않으면 404, 동시 요청과 직렬화
+    resources = list(db.scalars(select(Resource).where(Resource.project_id == p)))
+    if any(x.kind == 'job' and x.data.get('status') in ('queued', 'running') for x in resources):
+        raise APIError(409, 'PROJECT_BUSY', '현재 분석/검증 작업이 진행 중이어서 삭제할 수 없습니다. 작업을 취소하거나 완료 후 다시 시도해주세요.')
+    files = [x.data['storage_path'] for x in resources if x.kind in ('document', 'artifact') and x.data.get('storage_path')]
+    ids = select(Resource.id).where(Resource.project_id == p)
+    opts = {'synchronize_session': False}
+    db.execute(delete(Revision).where(Revision.resource_id.in_(ids)), execution_options=opts)
+    db.execute(delete(Resource).where(Resource.project_id == p), execution_options=opts)
+    db.execute(delete(SavedRequest).where(SavedRequest.project_id == p), execution_options=opts)
+    db.execute(delete(ProjectRecord).where(ProjectRecord.id == p), execution_options=opts)
+    db.commit()  # 파일은 DB 삭제가 확정된 뒤에만 지운다
+    delete_project_files(files, config)
 
 
 @router.get('/model-profiles')
