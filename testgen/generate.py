@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from llm import LLMClient
 
-PROMPT_VERSION = "testgen-v1"
+PROMPT_VERSION = "testgen-v2-design"
 
 INSTRUCTIONS = """\
 당신은 화면 기획서로 수동 시험 사양서를 작성하는 QA 엔지니어다.
@@ -53,7 +53,7 @@ INSTRUCTIONS = """\
 """
 
 
-def build_schema(condition_keys: list[str]) -> dict:
+def build_schema(condition_keys: list[str], design_items: list[dict] | None = None) -> dict:
     key = {"type": "string", "enum": condition_keys}
     warning = {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}},
                "required": ["code", "message"], "additionalProperties": False}
@@ -85,13 +85,30 @@ def build_schema(condition_keys: list[str]) -> dict:
     }
     uncovered = {"type": "object", "properties": {"condition_key": key, "reason": {"type": "string"}},
                  "required": ["condition_key", "reason"], "additionalProperties": False}
-    return {
+    schema = {
         "type": "object",
         "properties": {"scenarios": {"type": "array", "items": scenario},
                        "uncovered": {"type": "array", "items": uncovered}},
         "required": ["scenarios", "uncovered"],
         "additionalProperties": False,
     }
+    if design_items is not None:
+        intent = {"type": "string", "enum": [item['id'] for item in design_items]}
+        step['properties']['design'] = {
+            'type': 'object', 'additionalProperties': False,
+            'properties': {'intent_ids': {'type': 'array', 'items': intent},
+                           'rationale': {'type': 'string'}, 'input_rationale': {'type': 'string'},
+                           'basis': {'type': 'string', 'enum': ['specification', 'review_needed']}},
+            'required': ['intent_ids', 'rationale', 'input_rationale', 'basis']}
+        step['required'].append('design')
+        scenario['properties']['rationale'] = {'type': 'string'}
+        scenario['required'].append('rationale')
+        schema['properties']['uncovered_intents'] = {
+            'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
+                                     'properties': {'intent_id': intent, 'reason': {'type': 'string'}},
+                                     'required': ['intent_id', 'reason']}}
+        schema['required'].append('uncovered_intents')
+    return schema
 
 
 @dataclass(frozen=True)
@@ -156,12 +173,31 @@ def validate(result: dict, condition_keys: list[str]) -> tuple[list[dict], list[
     return scenarios, warnings
 
 
-def generate(client: LLMClient, subtopic_title: str, requirements: list[SpecRequirement]) -> dict:
+def generate(client: LLMClient, subtopic_title: str, requirements: list[SpecRequirement],
+             design_items: list[dict] | None = None) -> dict:
     """반환: {scenarios, warnings, usage, model}. 실패하면 RuntimeError."""
     keys = [c["stable_key"] for r in requirements for c in r.conditions]
-    res = client.complete_json(instructions=INSTRUCTIONS, context="",
-                               prompt=render(subtopic_title, requirements), schema=build_schema(keys))
+    instructions, prompt = INSTRUCTIONS, render(subtopic_title, requirements)
+    if design_items is not None:
+        instructions += '''
+시험 설계 설명
+- 아래 시험 관점 계획은 규칙 기반 제안이다. 명세에 없는 결과나 정책을 만들라는 지시가 아니다.
+- 시나리오 rationale에는 확인할 위험·조건과 이 흐름을 고른 이유를 1~2문장으로 쓴다.
+- 단계 design.rationale에는 연결 조건을 왜 이 절차로 확인하는지, input_rationale에는 입력값·역할 선정 근거를 간결하게 쓴다.
+  입력이 필요 없으면 그 이유를 쓴다. 내부 사고 과정을 쓰지 않고 사용자가 원문과 비교할 수 있는 설계 설명만 쓴다.
+- design.intent_ids는 이 단계가 실제 확인하는 관점만 선택한다. 그 관점들의 조건 키 집합은 condition_keys와 일치해야 한다.
+- 명세에 근거한 설명이면 basis=specification이다. 예상 동작·역할·입력값에 원문 밖의 해석이 필요하면
+  basis=review_needed로 두고 무엇을 확인해야 하는지 설명한다. 가정은 assumptions에도 남긴다.
+- 각 관점은 구별되는 확인이어야 한다. 하나의 동작으로 서로 반대되는 허용·거부 시험을 모두 했다고 쓰지 않는다.
+- 시험으로 만들지 않은 관점은 uncovered_intents에 이유를 남긴다. 작성한 관점을 미포함으로 중복 보고하지 않는다.
+- 로그인·화면 열기 등 검증 전 준비는 preconditions에 적는다. 검증 조건과 무관한 단계를 억지로 연결하지 않는다.
+'''
+        prompt += '\n권장 시험 관점(명세 원문을 기준으로 검토):\n' + '\n'.join(
+            f"- {i['id']} | 조건 {i['condition_key']} | {i['label']} | {i['reason']}" for i in design_items)
+    res = client.complete_json(instructions=instructions, context="", prompt=prompt,
+                               schema=build_schema(keys, design_items))
     if res.error or res.data is None:
         raise RuntimeError(f"{subtopic_title}: 시험 생성 실패 ({res.error})")
     scenarios, warnings = validate(res.data, keys)
-    return {"scenarios": scenarios, "warnings": warnings, "usage": res.usage, "model": res.model}
+    return {"scenarios": scenarios, "warnings": warnings, "usage": res.usage, "model": res.model,
+            "uncovered_intents": res.data.get('uncovered_intents', [])}

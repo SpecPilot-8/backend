@@ -29,6 +29,13 @@ class TestData(Input):
     notes: str = Field(default='', max_length=10000)
 
 
+class StepDesign(Input):
+    intent_ids: list[str] = Field(min_length=1, max_length=100)
+    rationale: str = Field(min_length=1, max_length=2000, pattern=r'\S')
+    input_rationale: str = Field(min_length=1, max_length=2000, pattern=r'\S')
+    basis: Literal['specification', 'review_needed']
+
+
 class Step(Input):
     step_key: str = Field(min_length=1, max_length=100)
     order: int = Field(ge=1, le=100)
@@ -36,6 +43,7 @@ class Step(Input):
     expected: str = Field(min_length=1, max_length=10000)
     test_data: TestData
     requirement_links: list[RequirementLink] = Field(min_length=1, max_length=100)
+    design: StepDesign | None = None
 
 
 class GenerateRequest(Input):
@@ -45,6 +53,7 @@ class GenerateRequest(Input):
 
 class GenerationRequest(GenerateRequest):
     model_config_version: int | None = Field(default=None, ge=0)
+    design_plan_version: str | None = None
 
 
 class CaseCreate(Input):
@@ -156,6 +165,8 @@ def spec_out(item, revision=None, db=None):
     data = public(item, revision, db)
     fixed = data.pop('requirements', [])
     data['requirement_versions'] = [{'requirement_id': r['id'], 'revision': r['revision']} for r in fixed]
+    plan = data.pop('design_plan', None)
+    data['design_plan_version'] = plan['version'] if plan else None
     return data
 
 
@@ -190,7 +201,14 @@ def validate_case(db, p, spec, data):
     combined = link_set(data['requirement_links'])
     union = set()
     for step in data['steps']:
+        if step.get('design') is None:
+            step.pop('design', None)
         union |= link_set(step['requirement_links'])
+        from testgen.design import validate_design
+        try:
+            validate_design(step, spec.get('design_plan'))
+        except ValueError:
+            raise APIError(422, 'VALIDATION_ERROR', '시험 관점은 해당 개정의 연결 조건과 일치해야 합니다') from None
     if combined != union:
         raise APIError(422, 'VALIDATION_ERROR', '시나리오 참조는 단계 참조의 합집합이어야 합니다')
     linked_subs = set()
@@ -209,6 +227,14 @@ def validate_case(db, p, spec, data):
 def changed_procedure(db, p, case, spec, procedure):
     data = {**deepcopy(case.data), **procedure.model_dump(mode='json', exclude_unset=True, exclude={'base_revision'})}
     if 'steps' in procedure.model_fields_set:
+        previous = {s['step_key']: s for s in case.data['steps']}
+        for step in data['steps']:
+            old = previous.get(step['step_key'], {})
+            if old and step.get('design') and step['design'] != old.get('design'):
+                raise APIError(422, 'VALIDATION_ERROR', '생성 당시 설계 설명은 직접 변경할 수 없습니다')
+            # 새 단계와 조건 연결을 바꾼 단계에는 과거의 생성 설명을 붙이지 않는다.
+            step['design'] = (deepcopy(old.get('design')) if
+                              old.get('requirement_links') == step['requirement_links'] else None)
         data['requirement_links'] = links_from_steps(data['steps'])
     validate_case(db, p, spec.data, data)
     if data == case.data:
@@ -257,6 +283,9 @@ def generation_input(p, body, db, settings):
     from api.v2.storage import project
     from api.v2.server_llm import connection_state, server_profile
     config = project(db, p)
+    from testgen.design import PLAN_VERSION
+    if body.design_plan_version is not None and body.design_plan_version != PLAN_VERSION:
+        raise APIError(409, 'CONFIG_CHANGED', '시험 설계 기준이 변경되었습니다. 생성 범위를 다시 확인하세요')
     if body.model_config_version is not None and config.config_version != body.model_config_version:
         raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되었습니다')
     enabled = server_profile(settings)['enabled']
@@ -274,10 +303,12 @@ def prepare_generation(p: str, body: GenerationRequest, db: DB, settings: Config
     run, selected, config, enabled, groups = generation_input(p, body, db, settings)
     if not enabled:
         raise APIError(409, 'LLM_NOT_CONFIGURED', '서버 모델 설정이 필요합니다')
+    from testgen.design import build_plan
     return {'verification_run_id': run.id, 'snapshot_id': run.data['snapshot_id'], 'model_config_version': config.config_version,
             'provider': settings.llm_provider, 'model': settings.llm_model,
             'requirement_count': len(selected), 'condition_count': sum(len(r['conditions']) for r in selected),
             'subtopic_count': len(groups), 'max_model_calls': len(groups),
+            'design_plan': build_plan(selected),
             'warnings': ['예상 결과는 승인된 명세로 생성하고 코드 예측은 기존 판정에서 따로 계산합니다.',
                          '생성 결과는 검토할 초안입니다. 실제 수행 O/X는 생성하지 않습니다.']}
 
@@ -291,6 +322,7 @@ def generate(p: str, body: GenerationRequest, db: DB, settings: Config, request:
         needed += missing('verification_result', '선택 실행의 코드 판정도 아직 완료되지 않았습니다')
     from api.v2.extraction_runner import QUEUE_LOCK
     from api.v2.test_generation_runner import PROMPT_VERSION, RULES_VERSION, run_generation
+    from testgen.design import build_plan
     with QUEUE_LOCK:
         if enabled and any(j.data['operation'] == 'generate_test_specification' and j.data['status'] in ('queued', 'running') for j in all_resources(db, p, 'job')):
             raise APIError(409, 'GENERATION_IN_PROGRESS', '테스트케이스 생성이 진행 중입니다. 기존 작업의 진행 상태를 확인하세요')
@@ -300,6 +332,7 @@ def generate(p: str, body: GenerationRequest, db: DB, settings: Config, request:
                       'generation_status': 'queued' if enabled else 'blocked', 'model_config_snapshot': model,
                       'prompt_version': PROMPT_VERSION, 'rules_version': RULES_VERSION,
                       'test_case_ids': [], 'case_versions': {}, 'requirements': selected, 'warnings': [], 'uncovered_conditions': [],
+                      'design_plan': build_plan(selected), 'design_gaps': [],
                       'revision_history': [{'revision': 1, 'date': now(), 'reason': 'AI 테스트케이스 생성 요청'}]})
         job = make_job(db, p, 'generate_test_specification', {**body.model_dump(), 'test_specification_id': spec.id}, needed,
                        result_ref={'kind': 'test_specification', 'id': spec.id} if enabled else None,
@@ -326,11 +359,21 @@ def specification(p: str, t: str, db: DB, revision: RevisionQuery = None):
     return spec_out(resource(db, p, t, 'test_specification'), revision, db)
 
 
+@router.get('/test-specifications/{t}/design-review')
+def review_design(p: str, t: str, db: DB, revision: RevisionQuery = None):
+    from testgen.design import design_review
+    spec = resource(db, p, t, 'test_specification')
+    fixed = historical(db, spec, revision)
+    return {'test_specification_id': t, **design_review(fixed, current_cases(db, p, spec, revision))}
+
+
 @router.post('/test-cases', status_code=201)
 def add_case(p: str, body: CaseCreate, db: DB):
     lock_project(db, p)
     spec = resource(db, p, body.test_specification_id, 'test_specification')
     ensure_editable(spec)
+    if any(s.design for s in body.steps):
+        raise APIError(422, 'VALIDATION_ERROR', '수동 시험에 AI 생성 설계 기록을 등록할 수 없습니다')
     case = create_case(db, p, spec, body.model_dump(mode='json'))
     update_spec(db, spec, {**spec.data['case_versions'], case.id: 1}, '수동 시험 추가')
     return public(case)

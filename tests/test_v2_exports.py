@@ -32,7 +32,9 @@ def test_test_export_steps_actual_results_and_literal_text(client, v2_project, v
     assert r.status_code == 200
     job = client.post(base(v2_project) + '/exports/test-specification', json=export_body(v2_case,3,True)).json()
     w, _ = workbook(client,v2_project,job)
-    assert w.sheetnames == ['개정이력','00. 목차','04. 공지사항','분석 상세']
+    assert w.sheetnames == ['개정이력','00. 목차','04. 공지사항','시험 설계 점검','분석 상세']
+    assert w['시험 설계 점검']['F2'].value == '관점 연결 없음'
+    assert w['분석 상세']['R2'].value == '설계 사유 미기록'
     s = w['04. 공지사항']
     assert s['A7'].value == s['A8'].value == v2_case['test_no']
     assert s['D7'].value == 1 and s['D8'].value == 2
@@ -86,3 +88,11 @@ def test_export_limit_and_text_conversion(client, config, v2_project, v2_case):
     with pytest.raises(APIError) as error:
         value(sheet['A2'], '불가\x00문자', warnings)
     assert error.value.code == 'UNEXPORTABLE_TEXT'
+
+
+def test_design_review_sheet_obeys_row_limit(client, config, v2_project, v2_case):
+    # 단계 수는 한도 이하지만 한 조건에서 파생된 여러 시험 관점은 한도를 넘는다.
+    object.__setattr__(config, 'max_export_rows', 2)
+    assert client.post(base(v2_project) + '/exports/test-specification', json=export_body(v2_case)).status_code == 202
+    r = client.post(base(v2_project) + '/exports/test-specification', json=export_body(v2_case, detail=True))
+    assert r.status_code == 413 and r.json()['error']['code'] == 'EXPORT_LIMIT_EXCEEDED'

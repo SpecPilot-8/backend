@@ -16,9 +16,10 @@ from api.v2.storage import project, public, resource
 from api.v2.test_generation_adapter import ingest_test_generation
 from api.v2.verification_runner import add_usage
 from testgen.generate import PROMPT_VERSION as GENERATOR_VERSION, SpecRequirement, generate, input_hash
+from testgen.design import build_plan
 
 PROMPT_VERSION = GENERATOR_VERSION + "-web-2"
-RULES_VERSION = "v2-prediction-1/generated-draft-1"
+RULES_VERSION = "v2-prediction-1/generated-design-1"
 
 
 def prepare_groups(run, selected):
@@ -52,8 +53,9 @@ def prepare_groups(run, selected):
 
 
 class GenerationClient:
-    def __init__(self, client, api_key):
+    def __init__(self, client, api_key, design_items=None):
         self.client, self.api_key, self.data, self.usage = client, api_key, None, {}
+        self.design_items = design_items
 
     def complete_json(self, **kwargs):
         schema = deepcopy(kwargs["schema"])
@@ -67,6 +69,14 @@ class GenerationClient:
         for key, maximum in [("action", 5000), ("expected", 10000)]:
             step[key].update(minLength=1, maxLength=maximum, pattern=r"\S")
         step["condition_keys"].update(uniqueItems=True)
+        if self.design_items is not None:
+            item['rationale'].update(minLength=1, maxLength=2000, pattern=r'\S')
+            design = step['design']['properties']
+            design['intent_ids'].update(maxItems=100, uniqueItems=True)
+            for key in ('rationale', 'input_rationale'):
+                design[key].update(minLength=1, maxLength=2000, pattern=r'\S')
+            schema['properties']['uncovered_intents']['items']['properties']['reason'].update(
+                minLength=1, maxLength=2000, pattern=r'\S')
         # 제공자의 지원 범위는 기본 구조/조건 enum으로 제한하고 길이·개수·중복은 로컬에서 강제한다.
         try:
             response = self.client.complete_json(
@@ -118,6 +128,20 @@ class GenerationClient:
             raise APIError(
                 422, "MODEL_OUTPUT_INVALID", "시험 조건의 연결/미포함 설명이 중복되거나 모순됩니다"
             )
+        if self.design_items is not None:
+            intents = {i['id']: i for i in self.design_items}
+            covered_intents = set()
+            for scenario in response.data['scenarios']:
+                for st in scenario['steps']:
+                    if not st['condition_keys']:
+                        continue  # 조건 없는 단계는 기존 검증에서 제외하고 경고한다.
+                    ids = st['design']['intent_ids']
+                    if not ids or {intents[i]['condition_key'] for i in ids} != set(st['condition_keys']):
+                        raise APIError(422, 'MODEL_OUTPUT_INVALID', '시험 관점과 단계의 원문 조건 연결이 일치하지 않습니다')
+                    covered_intents.update(ids)
+            gaps = [g['intent_id'] for g in response.data['uncovered_intents']]
+            if len(gaps) != len(set(gaps)) or covered_intents.intersection(gaps):
+                raise APIError(422, 'MODEL_OUTPUT_INVALID', '시험 관점의 작성/미포함 설명이 중복되거나 모순됩니다')
         self.data = response.data
         return response
 
@@ -128,6 +152,7 @@ def generate_draft(run, groups, client, api_key, model, progress):
         "verification_run_id": run["id"],
         "test_candidates": [],
         "warnings": [],
+        'design_gaps': [],
     }
     usage, hashes, uncovered = {}, {}, []
     for done, (sub_id, requirements) in enumerate(groups.items(), 1):
@@ -144,9 +169,10 @@ def generate_draft(run, groups, client, api_key, model, progress):
         hashes[sub_id] = sha256(
             json.dumps([PROMPT_VERSION, RULES_VERSION, input_hash(model, title, spec_reqs)]).encode()
         ).hexdigest()
-        wrapper = GenerationClient(client, api_key)
+        design_items = build_plan(requirements)['items']
+        wrapper = GenerationClient(client, api_key, design_items)
         try:
-            generated = generate(wrapper, title, spec_reqs)
+            generated = generate(wrapper, title, spec_reqs, design_items)
         except APIError as error:
             add_usage(usage, wrapper.usage)
             error.details = {**error.details, "usage": dict(usage)}
@@ -156,6 +182,7 @@ def generate_draft(run, groups, client, api_key, model, progress):
         part = build_test_generation({**run, "requirements": requirements}, sub_id, sub_id, generated)
         output["test_candidates"].extend(part["test_candidates"])
         output["warnings"].extend(part["warnings"])
+        output['design_gaps'].extend(part['design_gaps'])
         if len(output["test_candidates"]) > 500:
             raise APIError(413, "GENERATION_LIMIT_EXCEEDED", "생성 시험 수가 500개 한도를 초과했습니다")
         covered = {k for s in generated["scenarios"] for st in s["steps"] for k in st["condition_keys"]}
@@ -253,6 +280,7 @@ def run_generation(database, p, spec_id, config):
                     "uncovered_conditions": uncovered,
                     "input_hashes": hashes,
                     "usage": usage,
+                    'design_gaps': output['design_gaps'],
                 }
                 if output["test_candidates"]:
                     ids = ingest_test_generation(db, p, spec_id, output)

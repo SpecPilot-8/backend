@@ -22,6 +22,29 @@
         "$ref": "#/$defs/Warning"
       },
       "minItems": 0
+    },
+    "design_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "intent_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "intent_id",
+          "reason"
+        ]
+      }
     }
   },
   "required": [
@@ -113,6 +136,9 @@
             "$ref": "#/$defs/RequirementLink"
           },
           "minItems": 1
+        },
+        "design": {
+          "$ref": "#/$defs/StepDesign"
         }
       },
       "required": [
@@ -221,6 +247,9 @@
             "$ref": "#/$defs/Warning"
           },
           "minItems": 0
+        },
+        "design": {
+          "$ref": "#/$defs/CaseDesign"
         }
       },
       "required": [
@@ -262,6 +291,69 @@
         "code",
         "message",
         "block_ids"
+      ]
+    },
+    "StepDesign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "intent_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "\\S"
+        },
+        "input_rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "\\S"
+        },
+        "basis": {
+          "enum": [
+            "specification",
+            "review_needed"
+          ]
+        }
+      },
+      "required": [
+        "intent_ids",
+        "rationale",
+        "input_rationale",
+        "basis"
+      ]
+    },
+    "CaseDesign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "\\S"
+        },
+        "generated_revision": {
+          "const": 1
+        },
+        "origin": {
+          "const": "model"
+        }
+      },
+      "required": [
+        "rationale",
+        "generated_revision",
+        "origin"
       ]
     }
   }

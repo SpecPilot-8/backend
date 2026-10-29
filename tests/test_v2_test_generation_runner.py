@@ -54,6 +54,15 @@ def generation(linked, monkeypatch):
             ],
             "uncovered": [],
         }
+        design_schema = kwargs['schema']['properties']['scenarios']['items']['properties']['steps']['items']['properties']['design']
+        intent_ids = design_schema['properties']['intent_ids']['items']['enum']
+        data['scenarios'][0]['rationale'] = '명세에 정의된 조건의 처리 결과를 확인하기 위한 시험입니다.'
+        data['uncovered_intents'] = []
+        for st in data['scenarios'][0]['steps']:
+            st['design'] = {'intent_ids': [i for i in intent_ids if i.split('::')[0] in st['condition_keys']],
+                            'rationale': '연결된 수락 조건의 처리 결과를 입력 후 확인합니다.',
+                            'input_rationale': '명세에 기재된 50자 제한을 확인하는 입력입니다.',
+                            'basis': 'specification'}
         if control.mode == "foreign-key":
             data["scenarios"][0]["steps"][0]["condition_keys"] = ["invented-key"]
         if control.mode == "unlinked-setup":
@@ -66,6 +75,8 @@ def generation(linked, monkeypatch):
                     "input": "",
                     "notes": "",
                     "condition_keys": [],
+                    'design': {'intent_ids': [], 'rationale': '환경 준비',
+                               'input_rationale': '별도 입력 없음', 'basis': 'review_needed'},
                 },
             )
         if control.mode == "actual":
@@ -74,7 +85,21 @@ def generation(linked, monkeypatch):
             data = {
                 "scenarios": [],
                 "uncovered": [{"condition_key": k, "reason": "시험 환경 확인 필요"} for k in keys],
+                'uncovered_intents': [{'intent_id': i, 'reason': '시험 환경 확인 필요'} for i in intent_ids],
             }
+        if control.mode == 'foreign-intent':
+            data['scenarios'][0]['steps'][0]['design']['intent_ids'] = ['invented-intent']
+        if control.mode == 'wrong-condition-intent':
+            data['scenarios'][0]['steps'][0]['design']['intent_ids'] = [intent_ids[-1]]
+        if control.mode == 'blank-rationale':
+            data['scenarios'][0]['steps'][0]['design']['rationale'] = ' '
+        if control.mode == 'review-needed':
+            data['scenarios'][0]['steps'][0]['design']['basis'] = 'review_needed'
+        if control.mode == 'missing-intent':
+            omitted = data['scenarios'][0]['steps'][0]['design']['intent_ids'].pop()
+            data['uncovered_intents'] = [{'intent_id': omitted, 'reason': '경계값의 단위를 원문과 확인해야 합니다.'}]
+        if control.mode == 'overlap-intent':
+            data['uncovered_intents'] = [{'intent_id': intent_ids[0], 'reason': '중복 미포함'}]
         if control.mode == "second-invalid" and len(calls) == 2:
             data["scenarios"][0]["title"] = ""
         return LLMResponse(data, "", "test-model", {"input_tokens": 10, "output_tokens": 5})
@@ -250,3 +275,82 @@ def test_pending_generation_cannot_duplicate_edit_or_replay_after_restart(genera
         current = restarted.get(b + f"/test-specifications/{spec['id']}").json()
         assert current["status"] == "failed" and current["error"]["code"] == "SERVER_RESTARTED"
     assert not calls
+
+
+def test_design_plan_and_rationale_are_pinned_and_review_is_revision_aware(generation):
+    c, p, body, _, calls, _ = generation
+    base = f'/api/v2/projects/{p}'
+    plan = c.post(base + '/test-specifications/generate/prepare', json=body).json()['design_plan']
+    assert not calls and plan['origin'] == 'rule_suggestion' and plan['summary']['intent_count'] > 3
+    assert c.post(base + '/test-specifications/generate', json={**body, 'design_plan_version': 'old'}).status_code == 409
+    assert not calls
+    _, job, spec = start(generation, {**body, 'design_plan_version': plan['version']})
+    assert job['status'] == 'completed' and 'design_plan' not in spec
+    review = c.get(base + f'/test-specifications/{spec["id"]}/design-review').json()
+    assert review['plan_available'] and review['summary']['intents_written'] == len(plan['items'])
+    cases = c.get(base + f'/test-cases?test_specification_id={spec["id"]}').json()['items']
+    case = cases[0]
+    assert case['design']['origin'] == 'model' and case['design']['generated_revision'] == 1
+    assert all(s['design']['rationale'] and s['design']['input_rationale'] for s in case['steps'])
+    edited = c.patch(base + f'/test-cases/{case["id"]}/procedure', json={'base_revision': 1, 'title': '검토 후 시험 수정'})
+    assert edited.status_code == 200 and edited.json()['design']['generated_revision'] == 1
+    latest = c.get(base + f'/test-specifications/{spec["id"]}/design-review').json()
+    assert latest['summary']['intents_review_needed'] > 0
+    historical = c.get(base + f'/test-specifications/{spec["id"]}/design-review?revision=2').json()
+    assert historical == review
+
+
+@pytest.mark.parametrize('mode', ['foreign-intent', 'wrong-condition-intent', 'blank-rationale', 'overlap-intent'])
+def test_untrustworthy_design_output_never_saves_cases(generation, mode):
+    c, p, _, control, *_ = generation
+    control.mode = mode
+    _, job, spec = start(generation)
+    assert job['status'] == 'failed' and job['error']['code'] == 'MODEL_OUTPUT_INVALID'
+    assert c.get(f'/api/v2/projects/{p}/test-cases?test_specification_id={spec["id"]}').json()['total'] == 0
+
+
+@pytest.mark.parametrize('mode', ['missing-intent', 'review-needed'])
+def test_missing_and_assumed_views_are_not_reported_as_written(generation, mode):
+    c, p, _, control, *_ = generation
+    control.mode = mode
+    _, job, spec = start(generation)
+    assert job['status'] == 'completed'
+    review = c.get(f'/api/v2/projects/{p}/test-specifications/{spec["id"]}/design-review').json()
+    key = 'intents_missing' if mode == 'missing-intent' else 'intents_review_needed'
+    assert review['summary'][key] > 0
+    if mode == 'missing-intent':
+        assert any('단위' in i['gap_reason'] for i in review['items'] if i['status'] == 'missing')
+
+
+def test_procedure_cannot_rewrite_generated_rationale_and_new_steps_do_not_inherit_it(generation):
+    from copy import deepcopy
+    c, p, *_ = generation
+    _, _, spec = start(generation)
+    base = f'/api/v2/projects/{p}'
+    case = c.get(base + f'/test-cases?test_specification_id={spec["id"]}').json()['items'][0]
+    steps = deepcopy(case['steps'])
+    steps[0]['design']['rationale'] = '원문 검증을 마쳤다는 조작된 설명'
+    assert c.patch(base + f'/test-cases/{case["id"]}/procedure', json={'base_revision': 1, 'steps': steps}).status_code == 422
+    steps = deepcopy(case['steps'])
+    steps.append({**deepcopy(steps[0]), 'step_key': 'new-step', 'order': len(steps) + 1})
+    changed = c.patch(base + f'/test-cases/{case["id"]}/procedure', json={'base_revision': 1, 'steps': steps})
+    assert changed.status_code == 200 and not changed.json()['steps'][-1].get('design')
+
+
+def test_export_keeps_design_reasons_and_review_status_separate_from_actual_results(generation):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    c, p, _, control, *_ = generation
+    control.mode = 'review-needed'
+    _, _, spec = start(generation)
+    base = f'/api/v2/projects/{p}'
+    job = c.post(base + '/exports/test-specification', json={
+        'test_specification_id': spec['id'], 'revision': spec['revision'], 'execution_selection': 'latest_per_case',
+        'template_id': 'thinktree-test-spec-v1', 'include_analysis_detail': True, 'format': 'xlsx'}).json()
+    content = c.get(base + f'/artifacts/{job["result_ref"]["id"]}/download').content
+    book = load_workbook(BytesIO(content))
+    assert '시험 설계 점검' in book.sheetnames
+    detail = book['분석 상세']
+    assert detail['O2'].value and detail['P2'].value and detail['Q2'].value
+    assert detail['R2'].value == '해석 확인 필요'
+    assert detail['I2'].value == 'not_run' and detail['J2'].value is None

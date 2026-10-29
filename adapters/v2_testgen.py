@@ -82,6 +82,7 @@ def build_test_generation(run: dict, subtopic_id: str, subtopic_key: str, genera
             "expected": st["expected"],
             "test_data": {"account": st["account"], "input": st["input"], "notes": st["notes"]},
             "requirement_links": _links(st["condition_keys"], cond_index),
+            **({'design': st['design']} if st.get('design') else {}),
         } for n, st in enumerate(s["steps"], 1)]
         keys = list(dict.fromkeys(k for st in s["steps"] for k in st["condition_keys"]))
         first_req = cond_index[keys[0]][0]
@@ -97,10 +98,13 @@ def build_test_generation(run: dict, subtopic_id: str, subtopic_key: str, genera
             "prediction": _prediction(keys, cond_index, run["results"], run["id"]),
             "assumptions": s["assumptions"],
             "warnings": [{**w, "block_ids": []} for w in s["warnings"]],
+            **({'design': {'rationale': s['rationale'], 'generated_revision': 1, 'origin': 'model'}}
+               if s.get('rationale') else {}),
         })
     return {
         "contract_version": CONTRACT_VERSION,
         "verification_run_id": run["id"],
         "test_candidates": candidates,
         "warnings": [{**w, "block_ids": []} for w in generated["warnings"]],
+        'design_gaps': generated.get('uncovered_intents', []),
     }

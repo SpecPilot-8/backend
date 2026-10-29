@@ -25,7 +25,7 @@ def ingest_test_generation(db, p, t, output):
     planned = []
     try:
         for c in candidates:
-            payload = CaseCreate.model_validate({k: v for k, v in c.items() if k not in ('candidate_key', 'prediction', 'assumptions', 'warnings')} | {'test_specification_id': t}).model_dump(mode='json')
+            payload = CaseCreate.model_validate({k: v for k, v in c.items() if k not in ('candidate_key', 'prediction', 'assumptions', 'warnings', 'design')} | {'test_specification_id': t}).model_dump(mode='json')
             validate_case(db, p, spec.data, payload)
             if c['prediction']['verification_run_id'] != run.id:
                 raise ValueError
@@ -38,12 +38,22 @@ def ingest_test_generation(db, p, t, output):
                 chunk = resource(db, p, chunk_id, 'chunk')
                 if chunk.data['snapshot_id'] != run.data['snapshot_id']:
                     raise ValueError
-            planned.append((payload, c['prediction'], c['assumptions'], c['warnings']))
+            if any(bool(c.get('design')) != bool(s.get('design')) for s in payload['steps']):
+                raise ValueError
+            planned.append((payload, c['prediction'], c['assumptions'], c['warnings'], c.get('design')))
+        known = {i['id'] for i in spec.data.get('design_plan', {}).get('items', [])}
+        gap_ids = [g['intent_id'] for g in output.get('design_gaps', [])]
+        covered = {i for c in candidates for s in c['steps'] for i in (s.get('design') or {}).get('intent_ids', [])}
+        if len(gap_ids) != len(set(gap_ids)) or not set(gap_ids) <= known or covered.intersection(gap_ids):
+            raise ValueError
     except (ValidationError, APIError, ValueError):
         raise APIError(422, 'MODEL_OUTPUT_INVALID', '시험 단계·참조·예측 근거가 유효하지 않습니다') from None
     versions, ids = dict(spec.data['case_versions']), []
-    for payload, prediction, assumptions, warnings in planned:
-        case = create_case(db, p, spec, {**payload, 'assumptions': assumptions, 'warnings': warnings}, 'generated', prediction)
+    for payload, prediction, assumptions, warnings, design in planned:
+        data = {**payload, 'assumptions': assumptions, 'warnings': warnings}
+        if design:
+            data['design'] = design
+        case = create_case(db, p, spec, data, 'generated', prediction)
         versions[case.id] = 1
         ids.append(case.id)
     # A new generation appends candidates and never overwrites manual edits/executions.
