@@ -1,6 +1,7 @@
 """불변 웹 스냅샷을 기존 매칭·화면 범위·조건 판정 모듈로 실행한다."""
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import replace as replace_judgment
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,7 +20,7 @@ from verdict.judge import ConditionInput, ConditionJudgment, ScreenContext, judg
 from verdict.rules import Evidence, pre_judge
 
 PROMPT_VERSION = 'select-v1-enum/judge-v5-web-2'
-RULES_VERSION = 'scope-static-v1-filter-2/aggregate-v1'
+RULES_VERSION = 'scope-static-v1-filter-3/aggregate-v1'
 
 
 class ValidatedClient:
@@ -139,6 +140,10 @@ def judge_run(run, snapshot, raw_chunks, client, api_key, root, deliver, progres
                     value = ConditionJudgment('needs_review', 'llm_invalid_output', '구현 판정에 필요한 이 화면 코드 근거가 없어 검토가 필요합니다')
                 refs = reference[rid] if value.status in ('needs_review', 'not_statically_verifiable') or value.reason_kind == 'llm' else []
                 refs = [cid for cid in refs if cid not in scopes[group]]
+                if value.status == 'not_found' and not evidence and refs:
+                    value = replace_judgment(value, status='needs_review', reason_kind='rule_other_screen_only',
+                        reasoning='이 화면에서 판정에 사용한 근거는 없고 다른 화면의 참고 코드만 있어 검토가 필요합니다. '
+                                  + (value.reasoning or ''))
                 evidence_numbers.update(evidence + refs)
                 for cid in evidence:
                     trusted[ids[cid]] = 'this_screen'
@@ -206,6 +211,11 @@ def run_verification(database, p, run_id, config):
             if error.code == 'JOB_CANCELLED':
                 return
             failure = {'code': error.code, 'message': error.message}
+            # 저장 관계의 식별 정보만 보존한다. 모델 원문이나 제공자 예외 본문은 노출하지 않는다.
+            diagnostics = {key: error.details[key] for key in ('rule', 'requirement_id', 'condition_id')
+                           if key in error.details}
+            if diagnostics:
+                failure['details'] = diagnostics
             mark_failed(database, p, run_id, job_id, failure)
         except Exception:
             mark_failed(database, p, run_id, job_id, {'code': 'VERIFICATION_FAILED',

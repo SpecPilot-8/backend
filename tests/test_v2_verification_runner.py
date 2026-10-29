@@ -52,6 +52,8 @@ def linked(config, monkeypatch):
                     ids = []
                 if control.mode == "outside-extra" and key == "main-rule":
                     ids.append(by_file["src/unrelated.js"])
+                if control.mode == "not-found-no-reference" and key == "main-rule":
+                    ids = [by_file["src/main.js"]]
                 matches.append({"requirement_key": key, "chunk_ids": ids})
             data = {"matches": matches}
         else:
@@ -61,12 +63,17 @@ def linked(config, monkeypatch):
             status = "mismatch" if "main-rule" in kwargs["prompt"] else "implemented"
             if control.mode == "foreign" and "main-rule" in kwargs["prompt"]:
                 cid, status = by_file["src/other.js"], "implemented"
+            evidence = [cid]
+            if control.mode.startswith("not-found-") and "main-rule" in kwargs["prompt"]:
+                status = "not_found"
+                if control.mode != "not-found-with-primary":
+                    evidence = []
             data = {
                 "conditions": [
                     {
                         "condition_id": int(n),
                         "status": status,
-                        "evidence_chunk_ids": [cid],
+                        "evidence_chunk_ids": evidence,
                         "reasoning": "50자 요구와 10자 구현 비교"
                         if status == "mismatch"
                         else "구현 근거 확인",
@@ -239,6 +246,75 @@ def test_provider_failure_does_not_forge_completed_verdict(linked):
     assert run["status"] == "failed"
     rows = c.get(f"/api/v2/projects/{p}/verification-runs/{run['id']}/traceability").json()["items"]
     assert all(r["status"] is None for r in rows)
+
+
+@pytest.mark.parametrize(
+    "mode,expected,scopes",
+    [
+        ("not-found-with-reference", "needs_review", {"other_screen"}),
+        ("not-found-no-reference", "not_found", set()),
+        ("not-found-with-primary", "not_found", {"this_screen", "other_screen"}),
+    ],
+)
+def test_not_found_evidence_scope_is_normalized_without_promoting_references(linked, mode, expected, scopes):
+    c, p, reqs, _, control, _, _ = linked
+    control.mode = mode
+    submitted, job = execute(linked)
+    assert job["status"] == "completed", job
+    detail = c.get(
+        f"/api/v2/projects/{p}/verification-runs/{submitted['result_ref']['id']}/requirements/{reqs[0]['id']}"
+    ).json()
+    assert [v["status"] for v in detail["condition_verdicts"]] == [expected, "not_statically_verifiable"]
+    assert {e["scope"] for e in detail["evidence"]} == scopes
+    if mode == "not-found-with-reference":
+        assert "다른 화면" in detail["condition_verdicts"][0]["reason"]
+        assert detail["evidence"] and all(e["file_path"] == "uploaded/src/other.js" for e in detail["evidence"])
+        assert detail["findings"] == []
+
+
+def test_reference_only_invalid_status_is_still_rejected_by_storage(linked, monkeypatch):
+    c, p, reqs, _, _, _, _ = linked
+    original = verification_runner.ingest_verdict
+
+    def invalid_output(db, project_id, run_id, output, trusted, graph):
+        output = deepcopy(output)
+        condition = output["condition_verdicts"][0]
+        condition.update(status="not_found", primary_chunk_ids=[])
+        return original(db, project_id, run_id, output, trusted, graph)
+
+    monkeypatch.setattr(verification_runner, "ingest_verdict", invalid_output)
+    _, job = execute(linked)
+    assert job["status"] == "failed" and job["error"]["code"] == "MODEL_OUTPUT_INVALID"
+    assert job["error"]["details"] == {
+        "rule": "reference_only_status",
+        "requirement_id": reqs[0]["id"],
+        "condition_id": reqs[0]["conditions"][0]["id"],
+    }
+    assert KEY not in str(job)
+
+
+def test_storage_diagnostics_identify_condition_and_preserve_completed_results(linked, monkeypatch):
+    c, p, reqs, _, _, _, _ = linked
+    original = verification_runner.ingest_verdict
+
+    def wrong_scope(db, project_id, run_id, output, trusted, graph):
+        if output["requirement_id"] == reqs[1]["id"]:
+            trusted = {cid: "other_screen" for cid in trusted}
+        return original(db, project_id, run_id, output, trusted, graph)
+
+    monkeypatch.setattr(verification_runner, "ingest_verdict", wrong_scope)
+    submitted, job = execute(linked)
+    assert job["status"] == "failed" and job["progress"]["completed"] == 1
+    assert job["error"]["details"] == {
+        "rule": "primary_scope",
+        "requirement_id": reqs[1]["id"],
+        "condition_id": reqs[1]["conditions"][0]["id"],
+    }
+    base = f"/api/v2/projects/{p}/verification-runs/{submitted['result_ref']['id']}"
+    assert c.get(base).json()["error"] == job["error"]
+    rows = c.get(base + "/traceability").json()["items"]
+    assert [r["status"] for r in rows] == ["mismatch", None]
+    assert KEY not in str(job)
 
 
 def test_mapping_is_explicit_and_scoped_to_snapshot(linked):
