@@ -276,6 +276,8 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
 
 ## 7. 테스트 사양서·절차·실제 수행 API (v2 계약)
 
+2026-10-30 추가: `POST /test-specifications/generate/prepare` 응답에 호출 없는 `design_plan`을 제공하며 생성 요청에서 `design_plan_version`을 확인한다. `GET /test-specifications/{t}/design-review?revision=n`으로 조건·관점과 고정 시험 개정의 연결을 조회한다. 웹 생성 결과의 시험/단계 `design`, 미포함 관점 `design_gaps`, 편집 후 재검토와 과거 자료 처리, Excel 확장 계약은 [시험 설계 근거 안내](TEST_DESIGN_GUIDE.md)를 따른다. 본 문서의 초기 blocked 설명과 달리 현재 웹 시험 생성 실행기는 서버 고정 모델을 호출하며 실제 자격정보와 완료된 검증 실행이 필요하다.
+
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
 | POST | `/projects/{p}/test-specifications/generate` | `{verification_run_id,requirement_ids}` → 202 Job |
