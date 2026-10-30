@@ -46,39 +46,47 @@ def ingest_verdict(db, p, v, output, trusted_scopes, trusted_graph=None):
     try:
         draft = VerdictDraft.model_validate(output)
     except ValidationError:
-        raise APIError(422, 'MODEL_OUTPUT_INVALID', '판정 출력 계약이 유효하지 않습니다') from None
+        raise APIError(422, 'MODEL_OUTPUT_INVALID', '판정 출력 계약이 유효하지 않습니다',
+                       details={'rule': 'output_schema'}) from None
     run = resource(db, p, v, 'verification_run')
     req = next((r for r in run.data['requirements'] if r['id'] == draft.requirement_id), None)
     graph = deepcopy(trusted_graph or {'nodes': [], 'edges': [], 'unresolved': []})
     # target은 원문 메타데이터다. 구현 계층과 무관하게 같은 스냅샷의 청크를 검증한다.
     chunks = {c.id: c for c in all_resources(db, p, 'chunk') if c.data['snapshot_id'] == run.data['snapshot_id']}
-    def check(condition):
+    def check(condition, rule, condition_id=None):
         if not condition:
-            raise APIError(422, 'MODEL_OUTPUT_INVALID', '조건·청크·화면 범위·노드 관계가 유효하지 않습니다')
-    check(req is not None and draft.snapshot_id == run.data['snapshot_id'])
-    check(draft.requirement_revision == req['revision'])
-    check(draft.requirement_id not in run.data['results'])
-    check(set(trusted_scopes) <= chunks.keys())
-    check(all(s in ('this_screen', 'other_screen', 'unreachable') for s in trusted_scopes.values()))
+            details = {'rule': rule}
+            if req is not None:
+                details['requirement_id'] = req['id']
+            if condition_id is not None:
+                details['condition_id'] = condition_id
+            raise APIError(422, 'MODEL_OUTPUT_INVALID', '조건·청크·화면 범위·노드 관계가 유효하지 않습니다',
+                           details=details)
+    check(req is not None and draft.snapshot_id == run.data['snapshot_id'], 'snapshot_requirement_match')
+    check(draft.requirement_revision == req['revision'], 'requirement_revision')
+    check(draft.requirement_id not in run.data['results'], 'duplicate_result')
+    check(set(trusted_scopes) <= chunks.keys(), 'chunk_snapshot')
+    check(all(s in ('this_screen', 'other_screen', 'unreachable') for s in trusted_scopes.values()), 'scope_values')
     conditions = {c['id']: c for c in req['conditions']}
     ids = [c.condition_id for c in draft.condition_verdicts]
-    check(len(ids) == len(set(ids)) and set(ids) == conditions.keys())
+    check(len(ids) == len(set(ids)) and set(ids) == conditions.keys(), 'condition_coverage')
     node_ids = {n['id'] for n in graph['nodes']}
-    check(len(node_ids) == len(graph['nodes']))
-    check(all(n.get('chunk_id') in chunks for n in graph['nodes']))
-    check(all(e['from'] in node_ids and e['to'] in node_ids for e in graph['edges']))
+    check(len(node_ids) == len(graph['nodes']), 'graph_node_unique')
+    check(all(n.get('chunk_id') in chunks for n in graph['nodes']), 'graph_chunk_snapshot')
+    check(all(e['from'] in node_ids and e['to'] in node_ids for e in graph['edges']), 'graph_edge_nodes')
     evidence, evidence_ids = {}, {}
     for c in draft.condition_verdicts:
-        check(len(c.primary_chunk_ids) == len(set(c.primary_chunk_ids)))
-        check(len(c.reference_chunk_ids) == len(set(c.reference_chunk_ids)))
-        check(all(trusted_scopes.get(k) == 'this_screen' for k in c.primary_chunk_ids))
-        check(all(trusted_scopes.get(k) == 'other_screen' for k in c.reference_chunk_ids))
+        check(len(c.primary_chunk_ids) == len(set(c.primary_chunk_ids)), 'primary_chunk_unique', c.condition_id)
+        check(len(c.reference_chunk_ids) == len(set(c.reference_chunk_ids)), 'reference_chunk_unique', c.condition_id)
+        check(all(trusted_scopes.get(k) == 'this_screen' for k in c.primary_chunk_ids), 'primary_scope', c.condition_id)
+        check(all(trusted_scopes.get(k) == 'other_screen' for k in c.reference_chunk_ids),
+              'reference_scope', c.condition_id)
         if conditions[c.condition_id]['verifiable'] == 'not_statically_verifiable':
-            check(c.status == 'not_statically_verifiable')
+            check(c.status == 'not_statically_verifiable', 'static_condition_status', c.condition_id)
         if c.status in ('implemented', 'partial', 'mismatch'):
-            check(c.primary_chunk_ids)
+            check(c.primary_chunk_ids, 'primary_required', c.condition_id)
         if not c.primary_chunk_ids and c.reference_chunk_ids:
-            check(c.status in ('needs_review', 'not_statically_verifiable'))
+            check(c.status in ('needs_review', 'not_statically_verifiable'), 'reference_only_status', c.condition_id)
         for k in c.primary_chunk_ids + c.reference_chunk_ids:
             if k not in evidence_ids:
                 evidence_ids[k] = new_id()
@@ -95,13 +103,14 @@ def ingest_verdict(db, p, v, output, trusted_scopes, trusted_graph=None):
             ev['explanation'] += c.reason + '\n'
     statuses = [c.status for c in draft.condition_verdicts]
     findings = []
-    check(len({f.key for f in draft.findings}) == len(draft.findings))
+    check(len({f.key for f in draft.findings}) == len(draft.findings), 'finding_key_unique')
     for f in draft.findings:
-        check(set(f.condition_ids) <= conditions.keys() and set(f.problem_node_ids) <= node_ids)
-        check(all(trusted_scopes.get(k) == 'this_screen' for k in f.problem_chunk_ids))
-        check(set(f.problem_chunk_ids + f.context_chunk_ids) <= evidence.keys())
+        check(set(f.condition_ids) <= conditions.keys() and set(f.problem_node_ids) <= node_ids,
+              'finding_condition_nodes')
+        check(all(trusted_scopes.get(k) == 'this_screen' for k in f.problem_chunk_ids), 'finding_primary_scope')
+        check(set(f.problem_chunk_ids + f.context_chunk_ids) <= evidence.keys(), 'finding_evidence')
         if f.suggested_code is not None:
-            check(aggregate(statuses) in ('partial', 'mismatch'))
+            check(aggregate(statuses) in ('partial', 'mismatch'), 'suggested_code_status')
         findings.append({'id': new_id(), 'title': f.title, 'condition_ids': f.condition_ids,
                          'evidence_ids': [evidence_ids[k] for k in f.problem_chunk_ids + f.context_chunk_ids],
                          'problem_node_ids': f.problem_node_ids, 'suggested_code': f.suggested_code})
