@@ -1,8 +1,9 @@
 from copy import deepcopy
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import Field
+from typing import Literal
 from api.errors import APIError
-from api.v2.common import DB, Input, Limit, Offset, make_job, missing
+from api.v2.common import DB, Config, Input, Limit, Offset, make_job, missing, job_out
 from api.v2.storage import all_resources, create, page, project, public, resource
 
 router = APIRouter(prefix='/api/v2/projects/{p}/verification-runs', tags=['v2 검증·추적표'])
@@ -14,17 +15,20 @@ class RequirementVersion(Input):
     revision: int = Field(ge=1)
 
 
+class ScopeConfig(Input):
+    stack: Literal['spring', 'react']
+    entries: dict[str, list[str]]
+    confirmed: Literal[True]
+
+
 class RunRequest(Input):
     snapshot_id: str
     requirement_versions: list[RequirementVersion] = Field(min_length=1, max_length=1000)
     model_config_version: int = Field(ge=0)
+    scope_config: ScopeConfig | None = None
 
 
-@router.post('', status_code=202)
-def verify(p: str, body: RunRequest, db: DB):
-    config = project(db, p)
-    if config.config_version != body.model_config_version:
-        raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되었습니다')
+def fixed_input(p, body, db):
     snap = resource(db, p, body.snapshot_id, 'snapshot')
     if snap.data['status'] != 'ready':
         raise APIError(409, 'SNAPSHOT_NOT_READY', '코드 스냅샷을 먼저 준비하세요')
@@ -39,15 +43,52 @@ def verify(p: str, body: RunRequest, db: DB):
         sub = resource(db, p, data['subtopic_id'], 'subtopic')
         topic = resource(db, p, sub.data['topic_id'], 'topic')
         fixed.append({**data, 'topic_id': topic.id, 'topic_title': topic.data['title'], 'subtopic_title': sub.data['title']})
-    needed = missing('implementation_judgment', '팀원 2의 조건별 코드 판정 어댑터가 필요합니다') + missing('call_flow', '호출·화면 도달 범위 분석 어댑터가 필요합니다')
+    return snap, fixed
+
+
+@router.post('/prepare')
+def prepare(p: str, body: RunRequest, db: DB):
+    from api.v2.verification_scope import scope_options
+    snap, fixed = fixed_input(p, body, db)
+    return scope_options(db, p, snap, fixed, getattr(project(db, p), 'tech_stack', 'auto'))
+
+
+@router.post('', status_code=202)
+def verify(p: str, body: RunRequest, db: DB, settings: Config, request: Request, background_tasks: BackgroundTasks):
+    config = project(db, p)
+    if config.config_version != body.model_config_version:
+        raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되었습니다')
+    snap, fixed = fixed_input(p, body, db)
+    from api.v2.server_llm import server_profile, connection_state
+    enabled = server_profile(settings)['enabled']
+    if enabled and connection_state(db, p, config.config_version, settings) != 'connected':
+        raise APIError(409, 'MODEL_NOT_CONNECTED', '프로젝트 설정에서 서버 모델의 실제 연결을 먼저 확인하세요')
+    scope = body.scope_config.model_dump() if body.scope_config else None
+    if enabled:
+        from api.v2.verification_scope import scope_options, validate_scope
+        validate_scope(scope, scope_options(db, p, snap, fixed, getattr(config, 'tech_stack', 'auto')))
+    needed = [] if enabled else missing('model_connection', '서버 모델 연결을 설정하고 화면 진입 파일을 확인하세요')
+    from api.v2.verification_runner import PROMPT_VERSION, RULES_VERSION, run_verification
+    from api.v2.extraction_runner import QUEUE_LOCK
     run = create(db, p, 'verification_run', {'snapshot_id': snap.id, 'requirement_versions': [x.model_dump() for x in body.requirement_versions],
-                  'model_config_snapshot': {'profile_id': config.profile_id, 'config_version': config.config_version},
-                  'prompt_version': None, 'rules_version': None, 'status': 'blocked', 'missing_features': needed,
+                  'model_config_snapshot': {'profile_id': config.profile_id, 'config_version': config.config_version,
+                                            'provider': settings.llm_provider, 'model': settings.llm_model},
+                  'scope_config': scope,
+                  'prompt_version': PROMPT_VERSION, 'rules_version': RULES_VERSION, 'status': 'queued' if enabled else 'blocked', 'missing_features': needed,
                   'requirements': fixed, 'results': {}})
-    job = make_job(db, p, 'verify', {'verification_run_id': run.id, **body.model_dump()}, needed)
-    run.data = {**run.data, 'job_id': job['id']}
-    db.flush()
-    return job
+    with QUEUE_LOCK:
+        if enabled and any(j.data['operation'] == 'verify' and j.data['status'] in ('queued', 'running') for j in all_resources(db, p, 'job')):
+            raise APIError(409, 'VERIFICATION_IN_PROGRESS', '이 프로젝트의 코드 검증이 진행 중입니다. 진행 상태를 확인하세요')
+        job = make_job(db, p, 'verify', {'verification_run_id': run.id, **body.model_dump()}, needed,
+                       result_ref={'kind': 'verification_run', 'id': run.id} if enabled else None,
+                       progress={'stage': 'queued', 'completed': 0, 'total': len(fixed)}, status='queued' if enabled else 'blocked')
+        run.data = {**run.data, 'job_id': job['id']}
+        if enabled:
+            create(db, p, 'verification_scope', {'snapshot_id': snap.id, **scope})
+        db.commit()
+    if enabled:
+        background_tasks.add_task(run_verification, request.app.state.database, p, run.id, settings)
+    return job_out(resource(db, p, job['id'], 'job'))
 
 
 def run_out(item):
@@ -82,7 +123,7 @@ def selected_rows(item, status=None, q=None):
                       'title': req['title'], 'topic_id': req['topic_id'], 'subtopic_id': req['subtopic_id'],
                       'topic_title': req['topic_title'], 'subtopic_title': req['subtopic_title'],
                       'analysis_state': 'completed' if result else item.data['status'], 'status': verdict,
-                      'reason': result['reason'] if result else '판정 모델 미연결: 분석되지 않았습니다',
+                      'reason': result['reason'] if result else item.data.get('error', {}).get('message', '판정이 아직 완료되지 않았습니다'),
                       'evidence_count': len(result['evidence']) if result else 0,
                       'finding_count': len(result['findings']) if result else 0,
                       'detail_url': f"/api/v2/projects/{item.project_id}/verification-runs/{item.id}/requirements/{req['id']}"})
@@ -112,7 +153,7 @@ def detail(p: str, v: str, r: str, db: DB):
     if result:
         return deepcopy(result)
     return {'run_id': v, 'snapshot_id': item.data['snapshot_id'], 'requirement_id': r, 'requirement_revision': req['revision'],
-            'status': None, 'analysis_state': item.data['status'], 'reason': '판정 모델이 연결되지 않았습니다',
+            'status': None, 'analysis_state': item.data['status'], 'reason': item.data.get('error', {}).get('message', '판정이 아직 완료되지 않았습니다'),
             'condition_verdicts': [{'condition_id': c['id'], 'status': None, 'reason': '미분석', 'evidence_ids': []} for c in req['conditions']],
             'findings': [], 'evidence': [], 'call_flow': {'nodes': [], 'edges': [], 'unresolved': []},
             'counts': {'findings': 0, 'affected_conditions': 0, 'evidence_locations': 0, 'files': 0},

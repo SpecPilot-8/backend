@@ -1,3 +1,5 @@
+> 2026-10-26 갱신: 서버 고정 모델 연결 검사와 화면 표 PDF 요구사항 추출을 웹 API에 연결했습니다. 코드 검증도 사용자 확인 진입점 → 기존 selector → 정적 화면 범위 → 기존 pre_judge/judge → v2 ingest 실행기로 연결합니다. 아래의 과거 blocked 항목은 초기 점검 이력이며 최신 실행 계약은 API_SPEC.md의 웹 코드 검증 항목을 따릅니다. [실제 Spring/React 표본 점검](WEB_VERIFICATION_TEST.md)도 확인하세요. 웹 시험 생성과 내구성 워커는 여전히 후속 작업입니다.
+
 # v2 API 구현·연동 상태
 
 2026-10-26 추가: CLI용 Vercel Gateway 어댑터와 DB 없는 연결 진단 명령을 추가했다. [키·모델 설정과 실제 테스트 순서](VERCEL_GATEWAY_SETUP.md)를 따른다. 실제 키 호출은 미검증이며 웹 자격정보/모델 설정/자동 실행 API의 미연결 상태는 유지한다.

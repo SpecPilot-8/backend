@@ -589,3 +589,18 @@ SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/
 이미 저장된 요구사항은 덮어쓰지 않으며 문서별 중복 실행은 409로 거부한다. 원문에 없는 인용·누락 요구사항·잘못된 범주·버전 변경은 failed로 남긴다. 원문 중 조건에 연결되지 않은 구절은 review_reasons에 남긴다. 새 초안과 completed 작업은 같은 DB 트랜잭션으로 저장한다.
 
 개발 서버 한 프로세스에서 직렬 백그라운드 실행한다. 서버 재시작 시 중단 작업은 failed/SERVER_RESTARTED로 기록하고 유료 요청을 자동 재호출하지 않는다. 내구성 큐·다중 프로세스 워커·취소/선택 재시도는 #52의 후속 범위다. 한 번에 최대 100화면/2000요구사항 원문/300000자, 화면당 출력 16000토큰·요청 시간 제한 120초·자동 재시도 없음이다. 일반 문단 PDF와 스캔 본문 전체 OCR은 이 실행 경로가 지원하지 않으며 원문 검토·수동 등록이 필요하다.
+
+
+### 웹 코드 검증 실행 연결 (2026-10-26)
+
+`POST /projects/{p}/verification-runs/prepare`는 실행 요청과 같은 `{snapshot_id,requirement_versions,model_config_version}`를 받아 부작용/모델 호출 없이 `{snapshot_id,stack,files,groups:[{key,title,source_screen_id,suggested_files}],requires_confirmation,warnings}`를 반환한다. 파일은 현재 스냅샷의 지원 진입 소스이며 테스트·의존성 잠금 파일은 구현 근거에서 제외한다. 샘플의 기존 검토 매핑은 추천으로만 사용하며 사용자가 실제 연결을 확인해야 한다.
+
+`POST /projects/{p}/verification-runs`는 기존 필드에 `scope_config:{stack:"spring"|"react",entries:{화면그룹키:[파일경로]},confirmed:true}`를 추가한다. 승인된 요구사항 개정, 코드 스냅샷, 서버 모델 연결이 필요하다. 모델 설정이 유효한 경우 누락 매핑은 409 SCREEN_ENTRY_REQUIRED, 잘못된 경로/화면은 422 SCREEN_ENTRY_INVALID다. 프로젝트 내 동시 검증 요청은 409 VERIFICATION_IN_PROGRESS다.
+
+queued → running(화면 범위/코드 매칭/조건 판정) → completed 또는 failed로 실행한다. 기존 selector가 전체 구현 소스에서 관련 청크를 선택하고, 사용자가 확인한 진입점의 정적 도달 범위로 this_screen/other_screen을 나눈 뒤 기존 pre_judge/judge/aggregate 및 ingest_verdict를 실행한다. target으로 후보를 미리 거르지 않는다. 키워드 유사도만으로 구현 여부를 만들지 않는다. 매칭·판정의 임시 숫자 ID는 해당 스냅샷의 실제 UUID·파일·줄 번호로 대응한다.
+
+구현됨/부분구현/불일치에는 이 화면에서 도달하는 실제 근거가 필요하다. 후보 밖 ID·다른 화면 근거만 있음·검증 이슈·미지원 TS 도달 분석은 검토 필요로 남긴다. 정적 검증 불가 조건은 승인된 verifiable 값을 따르고 LLM 구현 판정에 넣지 않는다. 미완료 행은 status:null/미분석으로 남으며 전송/인증 실패를 completed로 바꾸지 않는다. 완료된 이전 요구사항 결과는 실패한 실행에서도 고정 버전으로 보존한다.
+
+실행의 model_config_snapshot/provider/model/config_version, scope_config, prompt_version, rules_version과 진행 이벤트를 보존한다. 서버 재시작 시 중단 작업과 실행은 failed/SERVER_RESTARTED로 기록하며 유료 자동 재시도는 하지 않는다. 원문 키·제공자 원문 오류는 노출하지 않는다. 실제 모델에는 승인된 명세와 코드가 전달되며 프론트 시작 화면에 이를 안내한다.
+
+call_flow의 nodes/edges는 정적 참조 관계다. 노드 순서를 임의의 실행 순서로 표시하지 않으며 실제 런타임 호출 추적과 구분한다. 동적 호출·미지원 스택·규칙 기반 도달 분석의 한계는 경고로 표시한다. 내구성 워커/취소/선택 재시도는 #52의 후속 범위다. 구현 후보 한도는 5000청크·50만 문자다.
