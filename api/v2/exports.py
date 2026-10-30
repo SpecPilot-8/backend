@@ -249,6 +249,23 @@ def test_export(p: str, body: TestExport, db: DB, config: Config):
     style_grid(index, 2, index.max_row, 8)
     index.freeze_panes = 'D5'
     if body.include_analysis_detail:
+        from testgen.design import design_review
+        review = design_review(spec_data, cases)
+        if max(len(review['items']), len(review['conditions'])) > config.max_export_rows:
+            raise APIError(413, 'EXPORT_LIMIT_EXCEEDED', '시험 설계 점검 시트의 출력 행 한도를 초과했습니다')
+        statuses = {'written': '시험 연결됨', 'review_needed': '검토 필요', 'missing': '관점 연결 없음'}
+        design_rows = [[i['requirement_title'], i['requirement_revision'], i['condition_text'], i['label'],
+                        i['reason'], statuses[i['status']],
+                        '\n'.join(f"{ref['test_no']} 단계 {ref['step_order']}" for ref in i['test_refs']),
+                        i['gap_reason']] for i in review['items']]
+        if review['plan_available']:
+            simple_sheet(book, '시험 설계 점검', ['요구사항','개정','수락 조건','권장 시험 관점','관점 선정 기준·규칙 제안',
+                         '설계 기록 연결 상태·수행 결과 아님','연결된 시험','미포함 사유'], design_rows, warnings)
+        else:
+            simple_sheet(book, '원문 연결 점검', ['요구사항','개정','수락 조건','연결된 시험','설계 기록'],
+                         [[i['requirement_title'], i['requirement_revision'], i['condition_text'],
+                           '\n'.join(f"{ref['test_no']} 단계 {ref['step_order']}" for ref in i['test_refs']),
+                           '작성 당시 관점 계획과 사유 미기록'] for i in review['conditions']], warnings)
         details = []
         for case in cases:
             e = selected[case['id']]
@@ -256,12 +273,19 @@ def test_export(p: str, body: TestExport, db: DB, config: Config):
             for step in case['steps']:
                 r = results.get(step['step_key'], {})
                 reqs = [next(x for x in spec_data['requirements'] if x['id'] == link['requirement_id']) for link in step['requirement_links']]
+                design = step.get('design') or {}
+                case_design = case.get('design') or {}
+                design_status = ('편집 전 설명·재검토 필요' if case_design and case_design.get('generated_revision') != case['revision']
+                                 else '해석 확인 필요' if design.get('basis') == 'review_needed'
+                                 else 'AI 설계 설명·원문 대조 필요' if design else '설계 사유 미기록')
                 details.append([case['test_no'], step['order'], case['revision'], json.dumps(step['requirement_links'],ensure_ascii=False),
                                 json.dumps(case['prediction'],ensure_ascii=False), '\n'.join(x['original_text'] for x in reqs),
                                 json.dumps([run.data['results'].get(x['id'], {}).get('evidence', []) for x in reqs],ensure_ascii=False),
                                 e['attempt_no'] if e else None, r.get('status','not_run'), r.get('actual',''), r.get('notes',''),
-                                r.get('performed_at'), e['environment'] if e else '', e['tested_build'] if e else ''])
-        simple_sheet(book, '분석 상세', ['시험번호','단계','절차 개정','조건 연결','코드 예측','원문','코드 근거','회차','수행 상태','실제 결과','수행 메모','수행 시각','환경','실제 빌드'], details, warnings)
+                                r.get('performed_at'), e['environment'] if e else '', e['tested_build'] if e else '',
+                                case_design.get('rationale', ''), design.get('rationale', ''), design.get('input_rationale', ''), design_status])
+        simple_sheet(book, '분석 상세', ['시험번호','단계','절차 개정','조건 연결','코드 예측','원문','코드 근거','회차','수행 상태','실제 결과','수행 메모','수행 시각','환경','실제 빌드',
+                     '시험 설계 이유','절차 선정 이유','입력값·역할 선정 이유','설계 설명 상태'], details, warnings)
     selection = {**body.model_dump(), 'verification_run_version': run.version, 'snapshot_id': run.data['snapshot_id'], 'case_versions': spec_data['case_versions'], 'executions': execution_refs}
     return artifact(db, p, config, book, 'test-specification.xlsx', selection, warnings)
 
