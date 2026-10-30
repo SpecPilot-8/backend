@@ -250,6 +250,37 @@ def test_export(p: str, body: TestExport, db: DB, config: Config):
     index.freeze_panes = 'D5'
     if body.include_analysis_detail:
         from testgen.design import design_review
+        from api.v2.test_design_reviews import review_for_case
+        human_reviews = {case['id']: review_for_case(db, p, case) for case in cases}
+        comparison = []
+        steps_by_condition = {}
+        reviews_by_case = {case_id: {(i['requirement_id'], i['requirement_revision'], i['condition_id']): i
+                                    for i in review['items']} for case_id, review in human_reviews.items()}
+        for case in cases:
+            for step in case['steps']:
+                keys = {(link['requirement_id'], link['requirement_revision'], cid)
+                        for link in step['requirement_links'] for cid in link['condition_ids']}
+                for key in keys:
+                    steps_by_condition.setdefault(key, []).append((case, step))
+        decision_labels = {'adequate': '설계 적합·사용자 검토', 'needs_changes': '보완 필요', 'uncertain': '판단 보류'}
+        for req in spec_data['requirements']:
+            for condition in req['conditions']:
+                key = (req['id'], req['revision'], condition['id'])
+                matches = steps_by_condition.get(key, [])
+                for case, step in matches:
+                    checked = reviews_by_case[case['id']].get(key, {})
+                    comparison.append([req['id'], req['revision'], req['title'], req['original_text'] or '원문 미등록', condition['text'],
+                        case['test_no'], case['revision'], step['order'], step['action'], step['expected'],
+                        (step.get('design') or {}).get('rationale', ''), decision_labels.get(checked.get('decision'), '설계 미검토'), checked.get('reason', '')])
+                if not matches:
+                    comparison.append([req['id'], req['revision'], req['title'], req['original_text'] or '원문 미등록', condition['text'],
+                                       '', None, None, '', '', '', '시험 연결 없음', ''])
+                if len(comparison) > config.max_export_rows:
+                    raise APIError(413, 'EXPORT_LIMIT_EXCEEDED', '요구사항·시험 대응 시트의 출력 행 한도를 초과했습니다')
+        if len(comparison) > config.max_export_rows:
+            raise APIError(413, 'EXPORT_LIMIT_EXCEEDED', '요구사항·시험 대응 시트의 출력 행 한도를 초과했습니다')
+        simple_sheet(book, '요구사항·시험 대응', ['요구사항 ID','요구사항 개정','요구사항','요구사항 원문 전체','수락 조건',
+                     '시험번호','시험 개정','단계','시험 절차','명세 기대 결과','AI 설계 설명','사람의 설계 검토·실제 수행 아님','검토 사유'], comparison, warnings)
         review = design_review(spec_data, cases)
         if max(len(review['items']), len(review['conditions'])) > config.max_export_rows:
             raise APIError(413, 'EXPORT_LIMIT_EXCEEDED', '시험 설계 점검 시트의 출력 행 한도를 초과했습니다')
@@ -287,6 +318,9 @@ def test_export(p: str, body: TestExport, db: DB, config: Config):
         simple_sheet(book, '분석 상세', ['시험번호','단계','절차 개정','조건 연결','코드 예측','원문','코드 근거','회차','수행 상태','실제 결과','수행 메모','수행 시각','환경','실제 빌드',
                      '시험 설계 이유','절차 선정 이유','입력값·역할 선정 이유','설계 설명 상태'], details, warnings)
     selection = {**body.model_dump(), 'verification_run_version': run.version, 'snapshot_id': run.data['snapshot_id'], 'case_versions': spec_data['case_versions'], 'executions': execution_refs}
+    if body.include_analysis_detail:
+        selection['design_review_versions'] = {identity: {'id': review.get('id'), 'version': review['version']}
+                                               for identity, review in human_reviews.items()}
     return artifact(db, p, config, book, 'test-specification.xlsx', selection, warnings)
 
 

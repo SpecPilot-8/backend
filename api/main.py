@@ -14,6 +14,7 @@ from api.v2.code import router as v2_code
 from api.v2.verification import router as v2_verification
 from api.v2.testing import router as v2_testing
 from api.v2.exports import router as v2_exports
+from api.v2.test_design_reviews import router as v2_test_design_reviews
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -32,7 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="SpecPilot API", version="0.2.0", lifespan=lifespan,
-        description="프로젝트·문서·코드·수동 판정 및 서버 고정 모델 연결 검사 API. 화면 표 PDF의 요구사항 추출을 지원하며 웹 코드 판정·시험 생성은 blocked 작업으로 누락 기능을 반환합니다.",
+        description="프로젝트·문서·코드와 서버 고정 모델의 요구사항 추출·조건별 코드 검증·시험 생성 API. 시험 설계 검토와 실제 수행 기록을 구분하며 원문·조건·코드 근거 및 Excel 출력을 제공합니다.",
     )
     app.state.settings = config
     app.state.database = database
@@ -54,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(v2_verification)
     app.include_router(v2_testing)
     app.include_router(v2_exports)
+    app.include_router(v2_test_design_reviews)
     return app
 
 
