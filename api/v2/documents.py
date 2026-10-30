@@ -23,6 +23,10 @@ class DocumentVersion(Input):
     document_revision: int = Field(ge=1)
 
 
+class ParseRequest(DocumentVersion):
+    force: bool = False
+
+
 class ExtractRequest(DocumentVersion):
     model_config_version: int = Field(ge=0)
     accept_warnings: bool = False
@@ -235,11 +239,13 @@ def document_file(p: str, d: str, db: DB):
 
 
 @router.post('/documents/{d}/parse', status_code=202)
-def parse(p: str, d: str, body: DocumentVersion, db: DB):
+def parse(p: str, d: str, body: ParseRequest, db: DB):
     item = resource(db, p, d, 'document')
     check_document_version(item, body.document_revision)
     # Replaying parse never replaces source block IDs referenced by saved requirements.
-    if item.data['parse_status'] in ('parsed', 'partial'):
+    if body.force and (item.data.get('requirement_ids') or any(r.data['document_id'] == d for r in all_resources(db, p, 'requirement'))):
+        raise APIError(409, 'DOCUMENT_SOURCE_IN_USE', '저장된 요구사항이 참조 중인 원문은 다시 파싱할 수 없습니다. 새 문서로 등록하세요')
+    if not body.force and item.data['parse_status'] in ('parsed', 'partial'):
         return make_job(db, p, 'parse_document', body.model_dump(), result_ref={'kind': 'document', 'id': d})
     try:
         parsed = parse_source(item.data['storage_path'], d, body.document_revision)
