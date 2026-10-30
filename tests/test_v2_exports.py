@@ -32,7 +32,7 @@ def test_test_export_steps_actual_results_and_literal_text(client, v2_project, v
     assert r.status_code == 200
     job = client.post(base(v2_project) + '/exports/test-specification', json=export_body(v2_case,3,True)).json()
     w, _ = workbook(client,v2_project,job)
-    assert w.sheetnames == ['개정이력','00. 목차','04. 공지사항','시험 설계 점검','분석 상세']
+    assert w.sheetnames == ['개정이력','00. 목차','04. 공지사항','요구사항·시험 대응','시험 설계 점검','분석 상세']
     assert w['시험 설계 점검']['F2'].value == '관점 연결 없음'
     assert w['분석 상세']['R2'].value == '설계 사유 미기록'
     s = w['04. 공지사항']
@@ -96,3 +96,25 @@ def test_design_review_sheet_obeys_row_limit(client, config, v2_project, v2_case
     assert client.post(base(v2_project) + '/exports/test-specification', json=export_body(v2_case)).status_code == 202
     r = client.post(base(v2_project) + '/exports/test-specification', json=export_body(v2_case, detail=True))
     assert r.status_code == 413 and r.json()['error']['code'] == 'EXPORT_LIMIT_EXCEEDED'
+
+
+def test_export_includes_original_conditions_and_pins_manual_review(client, v2_project, v2_case):
+    from test_v2_test_design_reviews import body, endpoint
+    url = endpoint(v2_project, v2_case)
+    request = body(v2_case)
+    assert client.put(url, json=request).status_code == 200
+    response = client.post(f'/api/v2/projects/{v2_project}/exports/test-specification', json=export_body(v2_case, detail=True))
+    assert response.status_code == 202, response.text
+    book, content = workbook(client, v2_project, response.json())
+    sheet = book['요구사항·시험 대응']
+    assert sheet['D2'].value and sheet['E2'].value
+    assert sheet['I2'].value == v2_case['steps'][0]['action']
+    assert sheet['J2'].value == v2_case['steps'][0]['expected']
+    assert sheet['L2'].value == '설계 적합·사용자 검토'
+    assert sheet['M2'].value == request['items'][0]['reason']
+    assert book['04. 공지사항']['J7'].value is None
+    request.update(base_version=1, client_review_id=str(uuid4()))
+    request['items'][0]['decision'] = 'needs_changes'
+    assert client.put(url, json=request).status_code == 200
+    _, pinned = workbook(client, v2_project, response.json())
+    assert pinned == content
