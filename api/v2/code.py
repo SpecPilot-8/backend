@@ -193,6 +193,18 @@ def snapshot(p: str, s: str, db: DB):
     return snapshot_out(resource(db, p, s, 'snapshot'))
 
 
+@router.get('/snapshots/{s}/files')
+def snapshot_files(p: str, s: str, db: DB):
+    """스냅샷에 고정된 소스 원문 전체. 편집기 확장이 같은 경로 구조의 폴더를 복원할 때 쓴다.
+
+    sha256은 UTF-8로 인코딩한 원문의 해시이며 업로드한 파일 바이트의 해시와 같다.
+    """
+    item = resource(db, p, s, 'snapshot')
+    files = [{'path': path, 'content': text, 'sha256': sha256(text.encode('utf-8')).hexdigest()}
+             for path, text in sorted(item.data['files'].items())]
+    return {'snapshot_id': item.id, 'content_hash': item.data['content_hash'], 'file_count': len(files), 'files': files}
+
+
 @router.get('/snapshots/{s}/chunks')
 def chunks(p: str, s: str, db: DB, file_path: str | None = None, q: str | None = None, limit: Limit = 50, offset: Offset = 0):
     resource(db, p, s, 'snapshot')
