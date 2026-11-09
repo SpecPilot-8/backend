@@ -167,7 +167,8 @@ def make_builder(snapshot, raw_chunks, scope, root):
         raise APIError(413, 'VERIFICATION_LIMIT_EXCEEDED', '현재 검증 한도는 소스 50만 문자·5000청크입니다')
     prefix = wrapper_prefix(files)
     rows, ids, metadata = [], {}, {}
-    for item in sorted(raw_chunks, key=lambda c: (c['file_path'], c['start_line'], c['end_line'], c['id'])):
+    for item in sorted(raw_chunks, key=lambda c: (c['file_path'], c['start_line'], c.get('start_byte', 0),
+                                                  c['end_line'], c['id'])):
         if not production_file(item['file_path']):
             continue
         cid = len(rows) + 1

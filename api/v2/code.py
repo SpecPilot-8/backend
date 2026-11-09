@@ -17,6 +17,8 @@ router = APIRouter(prefix='/api/v2/projects/{p}/code', tags=['v2 코드 스냅�
 EXTENSIONS = {'.java', '.js', '.jsx', '.html', '.htm', '.css', '.json', '.yaml', '.yml', '.properties', '.xml', '.ts', '.tsx', '.sql'}
 IGNORED = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', 'target', 'build', 'dist', '__MACOSX', '.AppleDouble'}
 _PARSER_LOCK = Lock()
+TEXT_CHUNK_MAX_BYTES = 8 * 1024
+CHUNKING_VERSION = f'text-utf8-v1:{TEXT_CHUNK_MAX_BYTES}'
 
 
 def supported_source(path):
@@ -108,6 +110,38 @@ def local_files(root, config):
     return files
 
 
+def text_chunks(path, text):
+    source = text.encode('utf-8')
+
+    def chunk(start, end, first_line, last_line):
+        return {'file_path': path, 'start_line': first_line, 'end_line': last_line,
+                'start_byte': start, 'end_byte': end, 'symbol': None,
+                'content': source[start:end].decode('utf-8'), 'chunk_type': 'text'}
+
+    start = line_end = 0
+    first_line = 1
+    for line_number, line in enumerate(text.splitlines(keepends=True), 1):
+        line_start = line_end
+        line_end += len(line.encode('utf-8'))
+        if line_end - start <= TEXT_CHUNK_MAX_BYTES:
+            continue
+        if start < line_start:
+            yield chunk(start, line_start, first_line, line_number - 1)
+        start, first_line = line_start, line_number
+        while line_end - start > TEXT_CHUNK_MAX_BYTES:
+            end = start + TEXT_CHUNK_MAX_BYTES
+            # UTF-8 문자와 CRLF 중간에서는 나누지 않는다.
+            while source[end] & 0b11000000 == 0b10000000:
+                end -= 1
+            if source[end - 1:end + 1] == b'\r\n':
+                end -= 1
+            yield chunk(start, end, line_number, line_number)
+            start = end
+
+    if start < len(source):
+        yield chunk(start, len(source), first_line, line_number)
+
+
 def chunk_file(path, text):
     from chunker.java_chunker import chunk_java_file
     from chunker.js_chunker import chunk_js_file
@@ -121,9 +155,7 @@ def chunk_file(path, text):
     if chunks:
         return [{'file_path': path, 'start_line': c.start_line, 'end_line': c.end_line,
                  'symbol': c.symbol_fqn, 'content': c.content, 'chunk_type': c.chunk_type} for c in chunks]
-    lines = text.splitlines(keepends=True)
-    return [{'file_path': path, 'start_line': i + 1, 'end_line': min(i + 120, len(lines)),
-             'symbol': None, 'content': ''.join(lines[i:i+120]), 'chunk_type': 'text'} for i in range(0, len(lines), 120)]
+    return list(text_chunks(path, text))
 
 
 @router.post('/sources', status_code=201)
@@ -158,13 +190,15 @@ def index(p: str, body: IndexRequest, db: DB, config: Config):
     for path, text in sorted(files.items()):
         digest.update(path.encode() + b'\0' + text.encode() + b'\0')
     content_hash = digest.hexdigest()
-    existing = next((s for s in all_resources(db, p, 'snapshot') if s.data['content_hash'] == content_hash), None)
+    existing = next((s for s in all_resources(db, p, 'snapshot') if s.data['content_hash'] == content_hash
+                     and s.data.get('chunking_version') == CHUNKING_VERSION), None)
     if existing:
         return make_job(db, p, 'index_code', body.model_dump(), result_ref={'kind': 'snapshot', 'id': existing.id})
     warnings = [{'code': 'SOURCE_FILTER', 'message': '지원 소스 파일 전체를 인덱싱합니다. 미지원 파일, macOS 메타데이터, .git/node_modules/빌드 폴더는 제외됩니다'}, {'code': 'CALL_SCOPE_AT_VERIFICATION', 'message': '청킹을 완료했습니다. 검증 단계에서 화면 진입 파일을 확인하면 정적 도달 범위를 분석합니다'}]
     if any(Path(path).suffix.lower() in ('.ts', '.tsx') for path in files):
         warnings.append({'code': 'TYPESCRIPT_TEXT_ONLY', 'message': 'TypeScript는 원문 청크만 제공하며 의미 파서는 미지원입니다'})
-    snapshot = create(db, p, 'snapshot', {'content_hash': content_hash, 'status': 'ready', 'source_kind': kind,
+    snapshot = create(db, p, 'snapshot', {'content_hash': content_hash, 'chunking_version': CHUNKING_VERSION,
+                     'status': 'ready', 'source_kind': kind,
                      'file_count': len(files), 'chunk_count': 0, 'warnings': warnings, 'files': files})
     count = 0
     for path, text in sorted(files.items()):

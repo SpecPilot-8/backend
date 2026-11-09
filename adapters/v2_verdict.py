@@ -4,7 +4,7 @@
 
 근거 청크는 id가 서로 달라서(파이프라인은 PostgreSQL 숫자, v2는 문자열) (파일, 시작 줄, 끝 줄)로 대응시킨다.
 두 쪽이 같은 청커(chunker/)로 같은 코드를 잘랐으면 그대로 맞는다. v2가 같은 범위를 다르게 잘랐으면
-(설정 파일을 120줄씩 자르는 등) 범위가 겹치는 v2 청크로 대응시키고 경고를 남긴다.
+(설정 파일을 바이트 한도에 맞춰 자르는 등) 범위가 겹치는 v2 청크로 대응시키고 경고를 남긴다.
 
 화면 범위(scope)는 파이프라인 판정에 이미 있다: primary = 이 화면 근거, reference = 다른 화면 참고 코드.
 """
@@ -28,17 +28,17 @@ class ChunkIndex:
         self.exact = {}
         self.by_file = defaultdict(list)
         for c in chunks:
-            self.exact.setdefault((c["file_path"], c["start_line"], c["end_line"]), c["id"])
+            self.exact.setdefault((c["file_path"], c["start_line"], c["end_line"]), c)
             self.by_file[c["file_path"]].append(c)
 
     def find(self, file_path: str, start: int, end: int) -> tuple[list[str], bool]:
         """(v2 청크 id 목록, 정확히 맞았는지)."""
         hit = self.exact.get((file_path, start, end))
-        if hit:
-            return [hit], True
+        if hit and "start_byte" not in hit:
+            return [hit["id"]], True
         overlap = [c["id"] for c in self.by_file.get(file_path, [])
                    if c["start_line"] <= end and start <= c["end_line"]]
-        return overlap, False
+        return overlap, hit is not None and len(overlap) == 1
 
 
 def build_verdict(requirement: dict, snapshot_id: str, verdicts: list[dict], index: ChunkIndex
