@@ -88,3 +88,14 @@ def test_workspace_escape_and_source_limit(client, config):
     assert client.post(base + '/index', json={'relative_path': '../'}).status_code == 422
     assert client.post(base + '/index', json={'relative_path': '.'}).json()['status'] == 'completed'
     assert client.post(base + '/sources', files={'file': ('x.zip', zip_bytes('x.js', 'x' * (config.max_source_file_bytes+1)))}).status_code == 413
+
+
+def test_snapshot_files_returns_original_text_with_hash(client, v2_project, v2_snapshot):
+    from hashlib import sha256
+    base = f'/api/v2/projects/{v2_project}/code/snapshots'
+    body = client.get(base + f'/{v2_snapshot}/files').json()
+    assert body['snapshot_id'] == v2_snapshot and body['file_count'] == len(body['files']) > 0
+    assert any(f['path'] == 'application.yml' for f in body['files'])
+    assert all(f['sha256'] == sha256(f['content'].encode('utf-8')).hexdigest() for f in body['files'])
+    assert 'files' not in client.get(base + f'/{v2_snapshot}').json()
+    assert client.get(base + '/does-not-exist/files').status_code == 404
