@@ -611,4 +611,6 @@ queued → running(화면 범위/코드 매칭/조건 판정) → completed 또�
 
 실행의 model_config_snapshot/provider/model/config_version, scope_config, prompt_version, rules_version과 진행 이벤트를 보존한다. 서버 재시작 시 중단 작업과 실행은 failed/SERVER_RESTARTED로 기록하며 유료 자동 재시도는 하지 않는다. 원문 키·제공자 원문 오류는 노출하지 않는다. 실제 모델에는 승인된 명세와 코드가 전달되며 프론트 시작 화면에 이를 안내한다.
 
+새 검증 Job의 `analysis_metrics`는 전체 후보를 전달하는 기준 경로(`strategy: all_chunks`)의 `scope_duration_ms`와 `matching`·`condition_judgment` 단계별 호출 수, 전송 청크 수, 모델 응답 시간 합계, 토큰 사용량을 기록한다. 호출 수는 백엔드가 요청한 횟수이며 청크 수에는 호출 간 반복 전송도 포함한다. 토큰은 제공업체의 입력·출력·캐시 읽기·캐시 생성 값을 분리하며 사용량 보고가 없으면 해당 단계의 `usage`는 빈 객체다. 실패 시 실패 전까지의 계측을 저장한다. 기존 Job의 합산 `usage`는 그대로 제공한다.
+
 call_flow의 nodes/edges는 정적 참조 관계다. 노드 순서를 임의의 실행 순서로 표시하지 않으며 실제 런타임 호출 추적과 구분한다. 동적 호출·미지원 스택·규칙 기반 도달 분석의 한계는 경고로 표시한다. 내구성 워커/취소/선택 재시도는 #52의 후속 범위다. 구현 후보 한도는 5000청크·50만 문자다.

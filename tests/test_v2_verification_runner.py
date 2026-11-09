@@ -84,7 +84,10 @@ def linked(config, monkeypatch):
                     for n in re.findall(r"^- id (\d+):", kwargs["prompt"], re.M)
                 ]
             }
-        return LLMResponse(data, "", "test-model", {"input_tokens": 20, "output_tokens": 10})
+        usage = {"input_tokens": 20, "output_tokens": 10}
+        if kwargs["schema"]["required"] == ["matches"]:
+            usage["cache_read_input_tokens"] = 30
+        return LLMResponse(data, "", "test-model", usage)
 
     monkeypatch.setattr(
         verification_runner, "analysis_client", lambda _: SimpleNamespace(complete_json=complete)
@@ -198,6 +201,18 @@ def test_real_modules_are_called_and_scope_is_not_target_filter(linked):
     submitted, job = execute(linked)
     assert submitted["status"] == "queued" and job["status"] == "completed", job
     assert len(calls) == 4  # 두 화면의 실제 selector+judge. 시각 조건은 judge로 보내지 않는다.
+    metrics = job["analysis_metrics"]
+    assert metrics["strategy"] == "all_chunks" and metrics["scope_duration_ms"] >= 0
+    for stage, required, tag in [("matching", "matches", "chunk"), ("condition_judgment", "conditions", "primary|reference")]:
+        sent = [v for v in calls if v["schema"]["required"] == [required]]
+        assert metrics[stage]["calls"] == len(sent) == 2
+        assert metrics[stage]["submitted_chunks"] == sum(
+            len(re.findall(rf'<(?:{tag}) id="\d+"', v["context"] + v["prompt"])) for v in sent
+        )
+        assert metrics[stage]["duration_ms"] >= 0 and metrics[stage]["usage"]["input_tokens"] == 40
+    assert metrics["matching"]["usage"]["cache_read_input_tokens"] == 60
+    assert metrics["condition_judgment"]["usage"]["cache_read_input_tokens"] == 0
+    assert job["usage"]["input_tokens"] == 80 and job["usage"]["cache_read_input_tokens"] == 60
     assert all("test-only-should-never-match" not in v["context"] for v in calls)
     assert all("lock-file-not-implementation" not in v["context"] for v in calls)
     assert any("schema.sql" in v["context"] for v in calls)
@@ -242,6 +257,9 @@ def test_provider_failure_does_not_forge_completed_verdict(linked):
         and job["error"]["code"] == "LLM_AUTHENTICATION_FAILED"
         and KEY not in str(job)
     )
+    assert job["analysis_metrics"]["matching"]["calls"] == 1
+    assert job["analysis_metrics"]["matching"]["usage"] == {}
+    assert job["analysis_metrics"]["condition_judgment"]["calls"] == 0
     run = c.get(f"/api/v2/projects/{p}/verification-runs/{submitted['result_ref']['id']}").json()
     assert run["status"] == "failed"
     rows = c.get(f"/api/v2/projects/{p}/verification-runs/{run['id']}/traceability").json()["items"]
