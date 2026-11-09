@@ -99,3 +99,44 @@ def test_snapshot_files_returns_original_text_with_hash(client, v2_project, v2_s
     assert all(f['sha256'] == sha256(f['content'].encode('utf-8')).hexdigest() for f in body['files'])
     assert 'files' not in client.get(base + f'/{v2_snapshot}').json()
     assert client.get(base + '/does-not-exist/files').status_code == 404
+
+
+def test_text_chunks_keep_original_utf8_ranges_and_snapshot_history(client, v2_project, monkeypatch):
+    from api.v2 import code
+    from adapters.v2_verdict import ChunkIndex
+
+    limit = code.TEXT_CHUNK_MAX_BYTES
+    original = 'first\r\n' + 'a' * (limit - 1) + '한😀' * limit + '\r\nlast\n'
+    source = original.encode('utf-8')
+    base = f'/api/v2/projects/{v2_project}/code'
+    response = client.post(base + '/sources', files={'file': ('source.zip', zip_bytes('application.yml', original))})
+    assert response.status_code == 201
+    request = {'source_id': response.json()['source_id']}
+    snapshot = client.post(base + '/index', json=request).json()['result_ref']['id']
+    chunks_url = base + f'/snapshots/{snapshot}/chunks'
+    chunks = client.get(chunks_url).json()['items']
+    ordered = sorted(chunks, key=lambda c: c['start_byte'])
+
+    assert ordered[0]['start_byte'] == 0
+    assert ordered[-1]['end_byte'] == len(source)
+    assert [c['end_byte'] for c in ordered[:-1]] == [c['start_byte'] for c in ordered[1:]]
+    for c in ordered:
+        fragment = source[c['start_byte']:c['end_byte']]
+        assert 0 < len(fragment) <= limit and fragment.decode('utf-8') == c['content']
+        assert not fragment.endswith(b'\r')
+    assert ordered[0]['start_line'] == ordered[0]['end_line'] == 1
+    assert ordered[-1]['end_line'] == 3
+    line_two = [c['id'] for c in chunks if c['start_line'] <= 2 <= c['end_line']]
+    assert len(line_two) > 1
+    assert ChunkIndex(chunks).find('application.yml', 2, 2) == (line_two, False)
+    assert client.post(base + '/index', json=request).json()['result_ref']['id'] == snapshot
+
+    with client.app.state.database.session() as db:
+        stored = resource(db, v2_project, snapshot, 'snapshot')
+        stored.data = {key: value for key, value in stored.data.items() if key != 'chunking_version'}
+    assert client.post(base + '/index', json=request).json()['result_ref']['id'] != snapshot
+    assert client.get(chunks_url).json()['items'] == chunks
+
+    assert len(code.chunk_file('x.yml', 'x\n' * 121)) == 1
+    monkeypatch.setattr(code, 'TEXT_CHUNK_MAX_BYTES', 8)
+    assert [c['content'] for c in code.chunk_file('x.yml', 'a' * 7 + '\r\n')] == ['a' * 7, '\r\n']
