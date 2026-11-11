@@ -10,7 +10,7 @@ from time import perf_counter
 from jsonschema import Draft202012Validator
 
 from api.errors import APIError
-from api.v2.extraction_runner import WORK_LOCK, analysis_client, transition_job, update_job
+from api.v2.extraction_runner import WORK_LOCK, analysis_client, transition_job
 from api.v2.server_llm import fail
 from api.v2.storage import all_resources, project, public, replace, resource
 from api.v2.verdict_adapter import ingest_verdict
@@ -191,15 +191,22 @@ def run_verification(database, p, run_id, config):
             job_id = run.data['job_id']
         try:
             with database.session() as db:
-                run = deepcopy(resource(db, p, run_id, 'verification_run').data)
+                from api.v2.testing import lock_project
+                lock_project(db, p)
+                job = resource(db, p, job_id, 'job')
+                if job.data['status'] != 'queued':
+                    return
+                value = resource(db, p, run_id, 'verification_run')
+                if value.data['status'] != 'queued':
+                    return
+                run = deepcopy(value.data)
                 version = run['model_config_snapshot']['config_version']
                 if project(db, p).config_version != version:
                     raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되어 검증을 중단했습니다')
                 snapshot = deepcopy(resource(db, p, run['snapshot_id'], 'snapshot').data)
                 chunks = [public(c) for c in all_resources(db, p, 'chunk') if c.data['snapshot_id'] == run['snapshot_id']]
-                value = resource(db, p, run_id, 'verification_run')
                 replace(db, value, {**value.data, 'status': 'running'})
-            update_job(database, p, job_id, 'running', progress={'stage': 'scope_analysis', 'completed': 0, 'total': len(run['requirements'])})
+                transition_job(db, job, 'running', progress={'stage': 'scope_analysis', 'completed': 0, 'total': len(run['requirements'])})
             client = analysis_client(config)
             def deliver(draft, trusted, graph, usage, done, total):
                 with database.session() as db:
@@ -210,18 +217,24 @@ def run_verification(database, p, run_id, config):
                         raise APIError(409, 'JOB_CANCELLED', '작업이 중단되었습니다')
                     if project(db, p).config_version != version:
                         raise APIError(409, 'CONFIG_CHANGED', '검증 중 모델 설정이 변경되었습니다. 완료된 이전 결과는 원래 설정으로 보존합니다')
+                    job.data = {**job.data, 'usage': dict(usage), 'analysis_metrics': deepcopy(metrics)}
                     ingest_verdict(db, p, run_id, draft, trusted, graph)
-                    transition_job(db, job, 'completed' if done == total else 'running',
-                        progress={'stage': 'condition_judgment', 'completed': done, 'total': total}, usage=dict(usage),
-                        analysis_metrics=deepcopy(metrics),
-                        result_ref={'kind': 'verification_run', 'id': run_id}, missing_features=[])
+                    if resource(db, p, run_id, 'verification_run').data['status'] != 'completed':
+                        transition_job(db, resource(db, p, job_id, 'job'), 'running',
+                            progress={'stage': 'condition_judgment', 'completed': done, 'total': total}, usage=dict(usage),
+                            analysis_metrics=deepcopy(metrics),
+                            result_ref={'kind': 'verification_run', 'id': run_id}, missing_features=[])
             def on_progress(stage, done, total):
                 with database.session() as db:
+                    from api.v2.testing import lock_project
+                    lock_project(db, p)
                     job = resource(db, p, job_id, 'job')
                     if job.data['status'] == 'cancelled':
                         raise APIError(409, 'JOB_CANCELLED', '작업이 중단되었습니다')
-                update_job(database, p, job_id, 'running',
-                    progress={'stage': stage, 'completed': done, 'total': total})
+                    if project(db, p).config_version != version:
+                        raise APIError(409, 'CONFIG_CHANGED', '검증 중 모델 설정이 변경되었습니다. 완료된 이전 결과는 원래 설정으로 보존합니다')
+                    transition_job(db, job, 'running',
+                        progress={'stage': stage, 'completed': done, 'total': total})
             with TemporaryDirectory(prefix='specpilot-verify-') as folder:
                 judge_run(run, snapshot, chunks, client, config.llm_api_key, Path(folder), deliver, on_progress, metrics)
         except APIError as error:
@@ -244,7 +257,12 @@ def run_verification(database, p, run_id, config):
 
 def mark_failed(database, p, run_id, job_id, failure, metrics):
     with database.session() as db:
+        from api.v2.testing import lock_project
+        lock_project(db, p)
+        job = resource(db, p, job_id, 'job')
+        if job.data['status'] == 'cancelled':
+            return
         run = resource(db, p, run_id, 'verification_run')
         replace(db, run, {**run.data, 'status': 'failed', 'error': failure, 'missing_features': []})
-        transition_job(db, resource(db, p, job_id, 'job'), 'failed', error=failure,
+        transition_job(db, job, 'failed', error=failure,
                        missing_features=[], analysis_metrics=deepcopy(metrics))
