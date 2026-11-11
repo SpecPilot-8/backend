@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import Field, ValidationError
 from api.errors import APIError
 from api.models import new_id
-from api.v2.common import Input, job_out
+from api.v2.common import Input
 from api.v2.storage import all_resources, replace, resource
 from verdict.rules import aggregate
 
@@ -130,9 +130,9 @@ def ingest_verdict(db, p, v, output, trusted_scopes, trusted_graph=None):
     status = 'completed' if len(results) == len(run.data['requirements']) else 'running'
     replace(db, run, {**run.data, 'results': results, 'status': status, 'missing_features': []})
     if status == 'completed':
+        from api.v2.extraction_runner import transition_job
         job = resource(db, p, run.data['job_id'], 'job')
-        data = {**job.data, 'status': status, 'missing_features': [], 'result_ref': {'kind': 'verification_run', 'id': v}}
-        event_data = {**job_out(job), 'status': status, 'missing_features': [], 'result_ref': data['result_ref']}
-        data['events'] = job.data['events'] + [{'id': len(job.data['events'])+1, 'event': status, 'data': event_data}]
-        replace(db, job, data)
+        transition_job(db, job, 'completed',
+                       progress={'stage': 'condition_judgment', 'completed': len(results), 'total': len(run.data['requirements'])},
+                       missing_features=[], result_ref={'kind': 'verification_run', 'id': v})
     return result

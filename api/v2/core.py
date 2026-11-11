@@ -203,29 +203,29 @@ def job(p: str, j: str, db: DB):
 
 @router.post('/projects/{p}/jobs/{j}/cancel')
 def cancel_job(p: str, j: str, db: DB):
+    from api.v2.testing import lock_project
+    lock_project(db, p)
     item = resource(db, p, j, 'job')
     if item.data['status'] not in ('queued', 'running'):
         raise APIError(409, 'JOB_NOT_RUNNING', f"이미 종료된 작업은 중단할 수 없습니다 (현재 상태: {item.data['status']})")
 
     from api.v2.extraction_runner import transition_job
     error_payload = {'code': 'JOB_CANCELLED', 'message': '사용자에 의해 작업이 중단되었습니다'}
-    transition_job(db, item, 'cancelled', error=error_payload)
+    transition_job(db, item, 'cancelled', error=error_payload, missing_features=[])
 
     ref = item.data.get('result_ref')
     if ref and ref.get('id'):
         if ref.get('kind') == 'verification_run':
             run_res = resource(db, p, ref['id'], 'verification_run')
             if run_res.data['status'] in ('queued', 'running'):
-                replace(db, run_res, {**run_res.data, 'status': 'cancelled', 'error': error_payload})
+                replace(db, run_res, {**run_res.data, 'status': 'cancelled', 'error': error_payload, 'missing_features': []})
         elif ref.get('kind') == 'test_specification':
             spec_res = resource(db, p, ref['id'], 'test_specification')
             if spec_res.data.get('generation_status') in ('queued', 'running'):
-                replace(db, spec_res, {**spec_res.data, 'status': 'failed', 'generation_status': 'cancelled', 'error': error_payload})
+                spec_res.data = {**spec_res.data, 'status': 'failed', 'generation_status': 'cancelled', 'error': error_payload}
 
     db.commit()
     return job_out(resource(db, p, j, 'job'))
-
-
 @router.get('/projects/{p}/jobs/{j}/events')
 def events(p: str, j: str, db: DB, last_event_id: Annotated[str | None, Header()] = None):
     item = resource(db, p, j, 'job')

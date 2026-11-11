@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 
 from adapters.v2_testgen import build_test_generation
 from api.errors import APIError
-from api.v2.extraction_runner import WORK_LOCK, analysis_client, transition_job, update_job
+from api.v2.extraction_runner import WORK_LOCK, analysis_client, transition_job
 from api.v2.server_llm import fail
 from api.v2.storage import project, public, resource
 from api.v2.test_generation_adapter import ingest_test_generation
@@ -146,7 +146,7 @@ class GenerationClient:
         return response
 
 
-def generate_draft(run, groups, client, api_key, model, progress):
+def generate_draft(run, groups, client, api_key, model, progress, check_cancelled=None):
     output = {
         "contract_version": "2.1",
         "verification_run_id": run["id"],
@@ -156,6 +156,8 @@ def generate_draft(run, groups, client, api_key, model, progress):
     }
     usage, hashes, uncovered = {}, {}, []
     for done, (sub_id, requirements) in enumerate(groups.items(), 1):
+        if check_cancelled:
+            check_cancelled()
         title = requirements[0].get("subtopic_title") or requirements[0]["title"]
         spec_reqs = [
             SpecRequirement(
@@ -220,7 +222,14 @@ def run_generation(database, p, spec_id, config):
             job_id = spec.data["job_id"]
         try:
             with database.session() as db:
+                from api.v2.testing import lock_project
+                lock_project(db, p)
+                job = resource(db, p, job_id, "job")
+                if job.data["status"] != "queued":
+                    return
                 spec = resource(db, p, spec_id, "test_specification")
+                if spec.data.get("generation_status") != "queued":
+                    return
                 spec_version = spec.version
                 version = spec.data["model_config_snapshot"]["config_version"]
                 if project(db, p).config_version != version:
@@ -232,17 +241,30 @@ def run_generation(database, p, spec_id, config):
                 groups = prepare_groups(run, selected)
                 # 작업 상태는 절차 개정이 아니다. Resource.version과 사양서 revision을 어긋나게 하지 않는다.
                 spec.data = {**spec.data, "status": "running", "generation_status": "running"}
-            update_job(
-                database,
-                p,
-                job_id,
-                "running",
-                progress={"stage": "test_generation", "completed": 0, "total": len(groups)},
-            )
+                transition_job(
+                    db,
+                    job,
+                    "running",
+                    progress={"stage": "test_generation", "completed": 0, "total": len(groups)},
+                )
             client = analysis_client(config)
+
+            def check_cancelled():
+                with database.session() as db:
+                    from api.v2.testing import lock_project
+                    lock_project(db, p)
+                    job = resource(db, p, job_id, "job")
+                    if job.data.get("status") == "cancelled":
+                        raise APIError(409, "JOB_CANCELLED", "테스트케이스 생성이 중단되었습니다")
+                    if project(db, p).config_version != version:
+                        raise APIError(
+                            409, "CONFIG_CHANGED", "생성 중 모델 설정이 변경되어 남은 호출을 중단했습니다"
+                        )
 
             def progress(done, total, used):
                 with database.session() as db:
+                    from api.v2.testing import lock_project
+                    lock_project(db, p)
                     job = resource(db, p, job_id, "job")
                     if job.data.get("status") == "cancelled":
                         raise APIError(409, "JOB_CANCELLED", "테스트케이스 생성이 중단되었습니다")
@@ -259,12 +281,15 @@ def run_generation(database, p, spec_id, config):
                     )
 
             output, usage, hashes, uncovered = generate_draft(
-                run, groups, client, config.llm_api_key, config.llm_model, progress
+                run, groups, client, config.llm_api_key, config.llm_model, progress, check_cancelled=check_cancelled
             )
             with database.session() as db:
                 from api.v2.testing import lock_project
 
                 lock_project(db, p)
+                job = resource(db, p, job_id, "job")
+                if job.data.get("status") == "cancelled":
+                    raise APIError(409, "JOB_CANCELLED", "테스트케이스 생성이 중단되었습니다")
                 spec = resource(db, p, spec_id, "test_specification")
                 if project(db, p).config_version != version or spec.version != spec_version:
                     raise APIError(
@@ -291,7 +316,7 @@ def run_generation(database, p, spec_id, config):
                     ids = []
                 transition_job(
                     db,
-                    resource(db, p, job_id, "job"),
+                    job,
                     "completed",
                     usage=usage,
                     progress={"stage": "test_generation", "completed": len(groups), "total": len(groups)},
@@ -329,11 +354,16 @@ def run_generation(database, p, spec_id, config):
 
 def mark_failed(database, p, spec_id, job_id, failure, usage=None):
     with database.session() as db:
+        from api.v2.testing import lock_project
+        lock_project(db, p)
+        job = resource(db, p, job_id, "job")
+        if job.data.get("status") == "cancelled":
+            return
         spec = resource(db, p, spec_id, "test_specification")
         spec.data = {**spec.data, "status": "failed", "generation_status": "failed", "error": failure}
         transition_job(
             db,
-            resource(db, p, job_id, "job"),
+            job,
             "failed",
             error=failure,
             missing_features=[],

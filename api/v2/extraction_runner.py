@@ -121,10 +121,12 @@ def remap_sources(value, mapping):
                 remap_sources(child, mapping)
 
 
-def extract_draft(document_id, doc, client, progress):
+def extract_draft(document_id, doc, client, progress, check_cancelled=None):
     screens, reqs, mapping = prepare_document(doc)
     conditions, usage = [], {'input_tokens': 0, 'output_tokens': 0}
     for index, s in enumerate(screens, 1):
+        if check_cancelled:
+            check_cancelled()
         selected = [r for r in reqs if r['screen_id'] == s['screen_id']]
         wrapped = CategorizedClient(client)
         out = decompose_screen(wrapped, s['screen_id'], s['screen_name'], [Requirement(r['id'], r['stable_key'], r['screen_id'], r['body']) for r in selected])
@@ -162,7 +164,12 @@ def transition_job(db, job, status, **fields):
 
 def update_job(database, p, job_id, status, **fields):
     with database.session() as db:
-        transition_job(db, resource(db, p, job_id, 'job'), status, **fields)
+        from api.v2.testing import lock_project
+        lock_project(db, p)
+        job = resource(db, p, job_id, 'job')
+        if job.data['status'] == 'cancelled':
+            return
+        transition_job(db, job, status, **fields)
 
 
 def run_extraction(database, p, d, job_id, config):
@@ -170,29 +177,59 @@ def run_extraction(database, p, d, job_id, config):
     with WORK_LOCK:
         try:
             with database.session() as db:
+                from api.v2.testing import lock_project
+                lock_project(db, p)
                 job = resource(db, p, job_id, 'job')
+                if job.data['status'] != 'queued':
+                    return
                 document = deepcopy(resource(db, p, d, 'document').data)
                 version = job.data['model_config_snapshot']['config_version']
                 if project(db, p).config_version != version:
                     raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되어 추출을 중단했습니다')
-            screens, _, _ = prepare_document(document)
-            update_job(database, p, job_id, 'running', progress={'stage': 'condition_extraction', 'completed': 0, 'total': len(screens)})
+                screens, _, _ = prepare_document(document)
+                transition_job(db, job, 'running', progress={'stage': 'condition_extraction', 'completed': 0, 'total': len(screens)})
             client = analysis_client(config)
-            draft, usage = extract_draft(d, document, client, lambda done, total: update_job(
-                database, p, job_id, 'running', progress={'stage': 'condition_extraction', 'completed': done, 'total': total}))
+
+            def check_cancelled():
+                with database.session() as db:
+                    from api.v2.testing import lock_project
+                    lock_project(db, p)
+                    job = resource(db, p, job_id, 'job')
+                    if job.data['status'] == 'cancelled':
+                        raise APIError(409, 'JOB_CANCELLED', '작업이 중단되었습니다')
+                    if project(db, p).config_version != version:
+                        raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되어 추출을 중단했습니다')
+
+            def on_progress(done, total):
+                with database.session() as db:
+                    from api.v2.testing import lock_project
+                    lock_project(db, p)
+                    job = resource(db, p, job_id, 'job')
+                    if job.data['status'] == 'cancelled':
+                        raise APIError(409, 'JOB_CANCELLED', '작업이 중단되었습니다')
+                    if project(db, p).config_version != version:
+                        raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되어 추출을 중단했습니다')
+                    transition_job(db, job, 'running', progress={'stage': 'condition_extraction', 'completed': done, 'total': total})
+
+            draft, usage = extract_draft(d, document, client, on_progress, check_cancelled=check_cancelled)
             from api.v2.documents import ingest_extraction
             with database.session() as db:
                 from api.v2.testing import lock_project
                 lock_project(db, p)
+                job = resource(db, p, job_id, 'job')
+                if job.data['status'] == 'cancelled':
+                    raise APIError(409, 'JOB_CANCELLED', '작업이 중단되었습니다')
                 if any(r.data['document_id'] == d for r in all_resources(db, p, 'requirement')):
                     raise APIError(409, 'EXTRACTION_ALREADY_STORED', '분석 중 요구사항이 추가되어 결과를 저장하지 않았습니다')
                 if project(db, p).config_version != version or resource(db, p, d, 'document').data['revision'] != document['revision']:
                     raise APIError(409, 'CONFIG_CHANGED', '분석 중 모델 또는 문서 버전이 변경되어 결과를 저장하지 않았습니다')
                 ids = ingest_extraction(db, p, d, draft)
-                transition_job(db, resource(db, p, job_id, 'job'), 'completed', result_ref={'kind': 'document', 'id': d},
+                transition_job(db, job, 'completed', result_ref={'kind': 'document', 'id': d},
                        result={'requirement_count': len(ids), 'condition_count': sum(len(r['conditions']) for r in draft['requirements'])},
                        usage=usage, missing_features=[])
         except APIError as error:
+            if error.code == 'JOB_CANCELLED':
+                return
             update_job(database, p, job_id, 'failed', error={'code': error.code, 'message': error.message})
         except anthropic.AuthenticationError:
             update_job(database, p, job_id, 'failed', error={'code': 'LLM_AUTHENTICATION_FAILED', 'message': '서버 API 키를 확인하세요'})
