@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from matcher.data import connect, load_chunks, load_screens
-from matcher.retrieve import DenseIndex, screen_candidates
+from matcher.retrieve import EMBEDDING_MODELS, DenseIndex, screen_candidates
 from matcher.scope import ScopeBuilder
 from matcher.select import INSTRUCTIONS, render_chunks
 from scripts.eval_retrieval import CACHE, latest_full_verdict_run, load_run, recall
@@ -40,7 +40,7 @@ def calibrate(conn, match_run_id: int, chunks) -> float:
     return cached / len(INSTRUCTIONS + render_chunks(chunks))
 
 
-def measure(conn, repo_id: str, ks: list[int]) -> None:
+def measure(conn, repo_id: str, ks: list[int], model: str) -> None:
     run_id = latest_full_verdict_run(conn, repo_id)
     snapshot_id, root, reqs, conditions, verdict_gold, match_gold = load_run(conn, run_id)
     match_run_id = conn.execute("SELECT match_run_id FROM verdict_run WHERE id = %s", (run_id,)).fetchone()[0]
@@ -55,7 +55,7 @@ def measure(conn, repo_id: str, ks: list[int]) -> None:
         if sid in scopes.entries:
             scope_of[rid] = scopes.scope(sid).all
             queries[rid] = "\n".join([body, *conditions[rid]])
-    dense = DenseIndex(chunks, cache_path=CACHE / f"{snapshot_id.replace(':', '_')}_bge-m3.npy")
+    dense = DenseIndex(chunks, model=model, cache_path=CACHE / f"{snapshot_id.replace(':', '_')}_{model}.npy")
     ranked = dense.rank_many(queries, scope_of)
 
     # 화면 진입점이 없는 화면은 어느 방식이든 전체 코드로 둔다 (검색을 적용할 범위가 없다)
@@ -74,7 +74,7 @@ def measure(conn, repo_id: str, ks: list[int]) -> None:
             methods[f"검색 {k}"][sid] = screen_candidates(ranked, [r.id for r in rs], k)
 
     full_tokens = ratio * len(INSTRUCTIONS + render_chunks(chunks))
-    print(f"\n[{repo_id}] 청크 {len(chunks)}개, 화면 {len(screens)}개 (진입점 없음 {len(no_entry)}: {', '.join(no_entry) or '-'})")
+    print(f"\n[{repo_id}] 임베딩 {model}, 청크 {len(chunks)}개, 화면 {len(screens)}개 (진입점 없음 {len(no_entry)}: {', '.join(no_entry) or '-'})")
     print(f"  보정: 글자당 {ratio:.3f}토큰 (match_run {match_run_id}, 화면 1회 약 {full_tokens:,.0f}토큰)")
     print(f"  {'방식':<8}{'화면당 후보':>10}{'화면당 토큰':>12}{'매칭 입력 합계':>14}{'추정 비용':>10}"
           f"{'판정근거 유지':>12}{'매칭근거 유지':>12}")
@@ -97,10 +97,11 @@ def measure(conn, repo_id: str, ks: list[int]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ks", nargs="*", type=int, default=[10, 20, 30, 50])
+    ap.add_argument("--model", default="bge-m3", choices=list(EMBEDDING_MODELS))
     args = ap.parse_args()
     with connect() as conn:
         for repo_id in ("spring-sample", "react-sample"):
-            measure(conn, repo_id, args.ks)
+            measure(conn, repo_id, args.ks, args.model)
 
 
 if __name__ == "__main__":

@@ -62,6 +62,18 @@ def build_index(chunks: list[ChunkRow]) -> BM25:
     return BM25({c.id: tokenize(chunk_text(c)) for c in chunks})
 
 
+# 비교한 로컬 임베딩 모델. 질의·문서 앞에 붙이는 지시문과 최대 길이가 모델마다 다르다.
+#   e5는 "query: "/"passage: " 접두어로 학습되었고 512토큰까지만 본다 (긴 청크는 잘린다)
+#   Qwen3-Embedding은 질의에만 내장 지시문(prompt_name="query")을 붙인다
+EMBEDDING_MODELS = {
+    "bge-m3": {"repo": "BAAI/bge-m3", "max_seq_length": 4096},
+    "kure-v1": {"repo": "nlpai-lab/KURE-v1", "max_seq_length": 4096},
+    "e5-large": {"repo": "intfloat/multilingual-e5-large", "max_seq_length": 512,
+                 "query_prefix": "query: ", "doc_prefix": "passage: "},
+    "qwen3-0.6b": {"repo": "Qwen/Qwen3-Embedding-0.6B", "max_seq_length": 4096, "query_prompt_name": "query"},
+}
+
+
 class DenseIndex:
     """로컬 임베딩 모델(기본 BGE-M3)로 의미 검색. 코드는 외부로 나가지 않는다.
 
@@ -69,19 +81,20 @@ class DenseIndex:
     청크 임베딩은 cache_path에 저장해 같은 스냅샷이면 다시 계산하지 않는다.
     """
 
-    def __init__(self, chunks: list[ChunkRow], model_name: str = "BAAI/bge-m3", cache_path=None,
-                 max_seq_length: int = 4096):
+    def __init__(self, chunks: list[ChunkRow], model: str = "bge-m3", cache_path=None):
         import numpy as np
         from sentence_transformers import SentenceTransformer
 
         self.np = np
-        self.model = SentenceTransformer(model_name)
-        self.model.max_seq_length = max_seq_length
+        self.spec = EMBEDDING_MODELS[model]
+        self.model = SentenceTransformer(self.spec["repo"])
+        self.model.max_seq_length = self.spec["max_seq_length"]
         self.ids = [c.id for c in chunks]
         if cache_path is not None and cache_path.exists():
             self.vecs = np.load(cache_path)
         else:
-            self.vecs = self.model.encode([chunk_text(c) for c in chunks], batch_size=4,
+            prefix = self.spec.get("doc_prefix", "")
+            self.vecs = self.model.encode([prefix + chunk_text(c) for c in chunks], batch_size=4,
                                           normalize_embeddings=True, show_progress_bar=False)
             if cache_path is not None:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,8 +103,9 @@ class DenseIndex:
 
     def rank_many(self, queries: dict[int, str], candidates: dict[int, set[int]] | None = None) -> dict[int, list[int]]:
         keys = list(queries)
-        qv = self.model.encode([queries[k] for k in keys], batch_size=16, normalize_embeddings=True,
-                               show_progress_bar=False)
+        prefix = self.spec.get("query_prefix", "")
+        qv = self.model.encode([prefix + queries[k] for k in keys], batch_size=16, normalize_embeddings=True,
+                               show_progress_bar=False, prompt_name=self.spec.get("query_prompt_name"))
         sims = qv @ self.vecs.T
         out = {}
         for k, s in zip(keys, sims):
