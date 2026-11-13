@@ -100,6 +100,14 @@ class DenseIndex:
         return out
 
 
+def screen_candidates(ranked: dict[int, list[int]], requirement_ids: list[int], k: int) -> set[int]:
+    """화면의 요구사항마다 상위 k개를 골라 합친다. 매칭은 화면 단위 호출이라 후보도 화면 단위다."""
+    out: set[int] = set()
+    for rid in requirement_ids:
+        out.update(ranked.get(rid, [])[:k])
+    return out
+
+
 def fuse(*rankings: list[int], k: int = 60) -> list[int]:
     """Reciprocal Rank Fusion. 점수 척도가 다른 BM25와 임베딩 순위를 순위만으로 합친다."""
     score: dict[int, float] = {}

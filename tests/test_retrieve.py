@@ -25,3 +25,10 @@ def test_bm25_ranks_matching_chunk_first_and_respects_candidates():
 def test_fuse_prefers_items_ranked_high_in_both():
     assert fuse([1, 2, 3], [2, 1, 3])[:2] == [1, 2]
     assert fuse([1, 2], [3, 2])[0] == 2
+
+
+def test_screen_candidates_unions_top_k_per_requirement():
+    from matcher.retrieve import screen_candidates
+    ranked = {1: [10, 11, 12], 2: [12, 13, 14], 3: [99]}
+    assert screen_candidates(ranked, [1, 2], 2) == {10, 11, 12, 13}
+    assert screen_candidates(ranked, [1, 4], 5) == {10, 11, 12}  # 순위가 없는 요구사항은 건너뛴다
