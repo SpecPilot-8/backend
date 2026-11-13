@@ -6,6 +6,7 @@
 
     SPECPILOT_LLM_PROVIDER   anthropic (기본값) | vercel | local (미구현)
     SPECPILOT_LLM_MODEL      provider별 모델 이름
+    SPECPILOT_LLM_EFFORT     anthropic 사고량 low | medium | high(기본) | xhigh | max. 출력 토큰 대부분이 사고라 비용에 직접 영향
 """
 
 import os
@@ -25,7 +26,10 @@ def get_client() -> LLMClient:
     provider = os.environ.get("SPECPILOT_LLM_PROVIDER", "anthropic")
     if provider == "anthropic":
         from llm.anthropic_client import AnthropicClient
-        return AnthropicClient(model=os.environ.get("SPECPILOT_LLM_MODEL", "claude-opus-5"))
+        effort = os.environ.get("SPECPILOT_LLM_EFFORT", "high")
+        if effort not in ("low", "medium", "high", "xhigh", "max"):
+            raise ValueError("SPECPILOT_LLM_EFFORT는 low, medium, high, xhigh, max 중 하나여야 합니다")
+        return AnthropicClient(model=os.environ.get("SPECPILOT_LLM_MODEL", "claude-opus-5"), effort=effort)
     if provider == "vercel":
         from llm.vercel_client import VercelClient
         try:

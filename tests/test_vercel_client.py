@@ -175,8 +175,16 @@ def test_existing_anthropic_factory_remains_available(vercel_env, monkeypatch):
     import llm.anthropic_client
     monkeypatch.setenv("SPECPILOT_LLM_PROVIDER", "anthropic")
     monkeypatch.delenv("SPECPILOT_LLM_MODEL")
-    monkeypatch.setattr(llm.anthropic_client, "AnthropicClient", lambda model: SimpleNamespace(model=model))
+    monkeypatch.setattr(llm.anthropic_client, "AnthropicClient",
+                        lambda model, effort: SimpleNamespace(model=model, effort=effort))
+    monkeypatch.delenv("SPECPILOT_LLM_EFFORT", raising=False)
     assert llm.get_client().model == "claude-opus-5"
+    assert llm.get_client().effort == "high"
+    monkeypatch.setenv("SPECPILOT_LLM_EFFORT", "medium")
+    assert llm.get_client().effort == "medium"
+    monkeypatch.setenv("SPECPILOT_LLM_EFFORT", "turbo")
+    with pytest.raises(ValueError):
+        llm.get_client()
 
 
 def test_gateway_output_still_goes_through_existing_chunk_whitelist():

@@ -81,7 +81,8 @@ def main() -> None:
             VALUES (%s, %s, %s, %s, %s) RETURNING id""",
             (snapshot_id, match_run, decompose_run, client.model, PROMPT_VERSION)).fetchone()[0]
         conn.commit()
-        print(f"verdict run {run_id}: {args.repo_id} / match run {match_run} / decompose run {decompose_run} / {client.model}")
+        print(f"verdict run {run_id}: {args.repo_id} / match run {match_run} / decompose run {decompose_run} / "
+              f"{client.model} (effort {getattr(client, 'effort', '-')})")
 
         # 1) 계획: 규칙 판정과 재사용을 먼저 정하고, LLM이 필요한 요구사항만 작업으로 모은다 (DB는 메인 스레드만 쓴다)
         plans = []  # (sid, req, ev, ctx, own, ref, results, to_llm)
@@ -104,7 +105,7 @@ def main() -> None:
                     if rule is not None:
                         results[cond.id] = (ConditionJudgment(rule.status, rule.reason_kind, rule.reasoning), None, None)
                         continue
-                    h = input_hash(client.model, ctx, cond, own, ref, chunks)
+                    h = input_hash(client.model, ctx, cond, own, ref, chunks, getattr(client, "effort", "high"))
                     prev = conn.execute("""
                         SELECT id, status, reason_kind, reasoning, message_match, server_validation, spec_suspect
                         FROM condition_verdict WHERE input_hash = %s AND reason_kind = 'llm'
