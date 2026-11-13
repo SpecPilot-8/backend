@@ -77,9 +77,10 @@ def main() -> None:
             conditions[req_id].append((ConditionInput(cid, statement, tuple(q["quote"] for q in quotes)), verifiable))
 
         run_id = conn.execute("""
-            INSERT INTO verdict_run (snapshot_id, match_run_id, decompose_run_id, model, prompt_version)
-            VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-            (snapshot_id, match_run, decompose_run, client.model, PROMPT_VERSION)).fetchone()[0]
+            INSERT INTO verdict_run (snapshot_id, match_run_id, decompose_run_id, model, prompt_version, effort)
+            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+            (snapshot_id, match_run, decompose_run, client.model, PROMPT_VERSION,
+             getattr(client, "effort", None))).fetchone()[0]
         conn.commit()
         print(f"verdict run {run_id}: {args.repo_id} / match run {match_run} / decompose run {decompose_run} / "
               f"{client.model} (effort {getattr(client, 'effort', '-')})")

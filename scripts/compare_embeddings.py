@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from matcher.data import connect, load_chunks
 from matcher.retrieve import EMBEDDING_MODELS, DenseIndex
 from matcher.scope import ScopeBuilder
-from scripts.eval_retrieval import CACHE, latest_full_verdict_run, load_run, recall
+from scripts.eval_retrieval import latest_full_verdict_run, load_run, recall
 
 KS = (10, 20, 30, 50)
 
@@ -40,15 +40,14 @@ def compare(conn, repo_id: str, models: list[str]) -> None:
     print(f"\n[{repo_id}] 청크 {len(chunks)}개, 판정 근거가 있는 요구사항 {len(gold)}개")
     print(f"  {'모델':<12}" + "".join(f"{'R@' + str(k):>8}" for k in KS) + f"{'첫 정답':>8}{'색인(초)':>10}{'검색(초)':>10}")
     for name in models:
-        cache = CACHE / f"{snapshot_id.replace(':', '_')}_{name}.npy"
-        cache.unlink(missing_ok=True)  # 색인 시간을 재려고 매번 새로 만든다
         started = time.perf_counter()
-        index = DenseIndex(chunks, model=name, cache_path=cache)
+        index = DenseIndex(chunks, model=name)  # 색인 시간을 재려고 캐시 없이 매번 새로 만든다
         indexed = time.perf_counter() - started
         started = time.perf_counter()
         ranked = index.rank_many(queries, scope_of)
         searched = time.perf_counter() - started
-        first = [min(ranked[r].index(c) for c in g if c in ranked[r]) + 1 for r, g in gold.items()]
+        first = [min(ranked[r].index(c) for c in g if c in ranked[r]) + 1
+                 for r, g in gold.items() if any(c in ranked[r] for c in g)]
         print(f"  {name:<12}" + "".join(f"{recall(gold, {r: v[:k] for r, v in ranked.items()}):>8.1%}" for k in KS)
               + f"{statistics.median(first):>8.0f}{indexed:>10.1f}{searched:>10.1f}")
         del index

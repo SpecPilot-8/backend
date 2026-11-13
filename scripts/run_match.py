@@ -62,7 +62,8 @@ def main() -> None:
         ranked = retrieval_rankings(conn, snapshot_id, chunks, screens, scopes, args.embedding) if args.method == "retrieval" else None
         shared_context = render_chunks(chunks) if args.method == "full_context" else None
 
-        run_id = create_run(conn, snapshot_id, args.method, client.model)
+        params = {"top_k": args.top_k, "embedding": args.embedding} if args.method == "retrieval" else None
+        run_id = create_run(conn, snapshot_id, args.method, client.model, params)
         conn.commit()
         print(f"run {run_id}: {args.method} / {args.repo_id} / {client.model}")
 

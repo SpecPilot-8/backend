@@ -212,9 +212,10 @@ def score(args) -> None:
                     print(f"  {st:<26}{by_gold[st]:>7}{by_pred[st]:>7}{prec:>8}{rec:>8}")
             # 결함 탐지를 이진 분류로 본 값. 판정이 implemented·needs_review가 아니면 '결함이라고 함'
             flagged = caught + false_alarm
-            print(f"  결함 탐지: 정밀도 {caught / flagged:.0%} (결함이라고 한 {flagged}개 중 실제 결함 {caught}), "
-                  f"재현율 {caught / len(defect):.0%} (실제 결함 {len(defect)}개 중 {caught}), "
-                  f"오탐율 {false_alarm / len(ok):.1%} (정상 {len(ok)}개 중 {false_alarm})")
+            rate = lambda n, d, fmt=".0%": format(n / d, fmt) if d else "-"
+            print(f"  결함 탐지: 정밀도 {rate(caught, flagged)} (결함이라고 한 {flagged}개 중 실제 결함 {caught}), "
+                  f"재현율 {rate(caught, len(defect))} (실제 결함 {len(defect)}개 중 {caught}), "
+                  f"오탐율 {rate(false_alarm, len(ok), '.1%')} (정상 {len(ok)}개 중 {false_alarm})")
             if args.verbose:
                 pred_order = [st for st in STATUSES if by_pred[st]]
                 print("  혼동 행렬 (행=정답, 열=판정): " + " / ".join(pred_order))

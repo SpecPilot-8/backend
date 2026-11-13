@@ -3,10 +3,10 @@ import json
 from matcher.select import PROMPT_VERSION, ScreenSelection
 
 
-def create_run(conn, snapshot_id: str, method: str, model: str) -> int:
+def create_run(conn, snapshot_id: str, method: str, model: str, params: dict | None = None) -> int:
     return conn.execute(
-        "INSERT INTO match_run (snapshot_id, method, model, prompt_version) VALUES (%s, %s, %s, %s) RETURNING id",
-        (snapshot_id, method, model, PROMPT_VERSION),
+        "INSERT INTO match_run (snapshot_id, method, model, prompt_version, params) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+        (snapshot_id, method, model, PROMPT_VERSION, json.dumps(params) if params else None),
     ).fetchone()[0]
 
 

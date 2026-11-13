@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS match_run (
 -- 이미 만든 DB에도 retrieval 방식을 허용한다 (CREATE IF NOT EXISTS는 기존 제약을 바꾸지 않는다)
 ALTER TABLE match_run DROP CONSTRAINT IF EXISTS match_run_method_check;
 ALTER TABLE match_run ADD CONSTRAINT match_run_method_check CHECK (method IN ('full_context', 'screen_scope', 'retrieval'));
+-- 방식별 설정(retrieval의 top_k·임베딩 모델). 같은 방식이라도 설정이 다르면 결과를 비교할 수 없다
+ALTER TABLE match_run ADD COLUMN IF NOT EXISTS params JSONB;
 
 -- 화면 1개 = LLM 호출 1번. 원문 응답을 남겨야 오답의 원인을 추적할 수 있다.
 CREATE TABLE IF NOT EXISTS match_call (
@@ -195,6 +197,8 @@ CREATE TABLE IF NOT EXISTS verdict_run (
     usage JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 판정 사고량(SPECPILOT_LLM_EFFORT). 비어 있으면 기본값 high로 돌린 실행이다
+ALTER TABLE verdict_run ADD COLUMN IF NOT EXISTS effort TEXT;
 
 CREATE TABLE IF NOT EXISTS condition_verdict (
     id BIGSERIAL PRIMARY KEY,

@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from collections import Counter
@@ -75,10 +76,10 @@ EMBEDDING_MODELS = {
 
 
 class DenseIndex:
-    """로컬 임베딩 모델(기본 BGE-M3)로 의미 검색. 코드는 외부로 나가지 않는다.
+    """로컬 임베딩 모델(EMBEDDING_MODELS)로 의미 검색. 코드는 외부로 나가지 않는다.
 
     한국어 기획서와 영어 식별자 사이처럼 단어가 겹치지 않는 경우를 BM25 대신 메운다.
-    청크 임베딩은 cache_path에 저장해 같은 스냅샷이면 다시 계산하지 않는다.
+    청크 임베딩은 cache_path(+ 모델·청크 내용 해시)에 저장해 같은 청크 목록이면 다시 계산하지 않는다.
     """
 
     def __init__(self, chunks: list[ChunkRow], model: str = "bge-m3", cache_path=None):
@@ -90,6 +91,11 @@ class DenseIndex:
         self.model = SentenceTransformer(self.spec["repo"])
         self.model.max_seq_length = self.spec["max_seq_length"]
         self.ids = [c.id for c in chunks]
+        if cache_path is not None:
+            # 같은 스냅샷이라도 청킹이 바뀌면 청크 id·내용이 달라진다. 내용 해시를 파일 이름에 넣어
+            # 다른 청크 목록의 벡터를 읽지 않게 한다
+            key = hashlib.sha256(repr((model, self.spec, [(c.id, chunk_text(c)) for c in chunks])).encode()).hexdigest()[:12]
+            cache_path = cache_path.with_name(f"{cache_path.stem}_{key}{cache_path.suffix}")
         if cache_path is not None and cache_path.exists():
             self.vecs = np.load(cache_path)
         else:
