@@ -82,8 +82,11 @@ class ScreenContext:
 
 
 def input_hash(model: str, screen: ScreenContext, cond: ConditionInput, own: tuple[int, ...],
-               reference: tuple[int, ...], chunks: dict[int, ChunkRow]) -> str:
-    """같은 조건·같은 근거 코드·같은 프롬프트·같은 모델이면 같은 값. 판정 재사용의 키."""
+               reference: tuple[int, ...], chunks: dict[int, ChunkRow], effort: str = "high") -> str:
+    """같은 조건·같은 근거 코드·같은 프롬프트·같은 모델·같은 사고량이면 같은 값. 판정 재사용의 키.
+
+    사고량은 기본값(high)이 아닐 때만 넣는다. 그래야 기존 판정의 키가 바뀌지 않아 재사용이 유지된다.
+    """
     h = hashlib.sha256()
     payload = {
         "prompt": PROMPT_VERSION, "model": model, "screen": [screen.screen_id, screen.screen_name],
@@ -91,6 +94,8 @@ def input_hash(model: str, screen: ScreenContext, cond: ConditionInput, own: tup
         "primary": [[i, chunks[i].content] for i in sorted(screen.primary)],
         "reference": [[i, chunks[i].content] for i in sorted(reference)],
     }
+    if effort != "high":
+        payload["effort"] = effort
     h.update(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
     return h.hexdigest()
 

@@ -200,6 +200,29 @@ def score(args) -> None:
                 if by_gold[st]:
                     same = sum(1 for g, v, _, _ in judged if g == st and v == st)
                     print(f"  정답 {st:<26} {by_gold[st]:>3}개 → 판정도 같음 {same}개")
+
+            # 상태별 정밀도(판정이 X라고 한 것 중 정답도 X) / 재현율(정답 X 중 판정도 X)
+            by_pred = Counter(v for _, v, _, _ in judged)
+            print(f"  {'상태':<26}{'정답 수':>7}{'판정 수':>7}{'정밀도':>8}{'재현율':>8}")
+            for st in STATUSES:
+                if by_gold[st] or by_pred[st]:
+                    same = sum(1 for g, v, _, _ in judged if g == st and v == st)
+                    prec = f"{same / by_pred[st]:.0%}" if by_pred[st] else "-"
+                    rec = f"{same / by_gold[st]:.0%}" if by_gold[st] else "-"
+                    print(f"  {st:<26}{by_gold[st]:>7}{by_pred[st]:>7}{prec:>8}{rec:>8}")
+            # 결함 탐지를 이진 분류로 본 값. 판정이 implemented·needs_review가 아니면 '결함이라고 함'
+            flagged = caught + false_alarm
+            rate = lambda n, d, fmt=".0%": format(n / d, fmt) if d else "-"
+            print(f"  결함 탐지: 정밀도 {rate(caught, flagged)} (결함이라고 한 {flagged}개 중 실제 결함 {caught}), "
+                  f"재현율 {rate(caught, len(defect))} (실제 결함 {len(defect)}개 중 {caught}), "
+                  f"오탐율 {rate(false_alarm, len(ok), '.1%')} (정상 {len(ok)}개 중 {false_alarm})")
+            if args.verbose:
+                pred_order = [st for st in STATUSES if by_pred[st]]
+                print("  혼동 행렬 (행=정답, 열=판정): " + " / ".join(pred_order))
+                for st in STATUSES:
+                    if by_gold[st]:
+                        row = [sum(1 for g, v, _, _ in judged if g == st and v == p) for p in pred_order]
+                        print(f"    {st:<26}" + "".join(f"{n:>5}" for n in row))
             wrong = [(k, s, g, v) for g, v, k, s in judged if g != v]
             if wrong and args.verbose:
                 print("  틀린 판정:")
