@@ -5,6 +5,7 @@ git 저장소가 아닌 샘플 코드라 commit_sha 대신 파일 해시 트리�
 중복되지 않는다.
 """
 
+import os
 import hashlib
 import json
 import sys
@@ -17,7 +18,8 @@ from chunker.html_chunker import chunk_html_file
 from chunker.java_chunker import chunk_java_file
 from chunker.js_chunker import chunk_js_file
 
-DSN = "dbname=specpilot"
+# 다른 기획서·샘플을 기존 결과와 섞지 않으려면 SPECPILOT_DSN으로 DB를 바꾼다
+DSN = os.environ.get("SPECPILOT_DSN", "dbname=specpilot")
 
 # test 제외: 테스트 코드는 구현 근거가 아니다. 테스트에 기능이 언급됐다는 이유로
 # implemented 판정이 나면 오탐이 된다.

@@ -1,0 +1,8 @@
+{
+  "_comment": "팀원 타이머 샘플(React 단독, 서버 없음). 화면ID -> 진입 파일.",
+  "TIMER-001": ["src/pages/MainScreen.jsx"],
+  "TIMER-002": ["src/pages/ConfigScreen.jsx"],
+  "TIMER-003": ["src/pages/RecordScreen.jsx"],
+  "TIMER-004": ["src/pages/StatisticsScreen.jsx"],
+  "TIMER-005": ["src/pages/BreakScreen.jsx"]
+}
