@@ -77,7 +77,9 @@ def main() -> None:
             else:
                 keep = scopes.scope(sid).all
                 candidates = [c for c in chunks if c.id in keep]
-            sel = select_for_screen(client, sid, name, reqs, candidates, context=shared_context)
+            # 전체 투입만 모든 화면이 같은 목록이라 캐시가 이득이다. 화면별 후보는 프롬프트로 보낸다
+            sel = select_for_screen(client, sid, name, reqs, candidates, context=shared_context,
+                                    cache_candidates=args.method == "full_context")
             save_selection(conn, run_id, sel)
             conn.commit()  # 화면 단위로 커밋: 중간에 실패해도 앞 화면 결과는 남는다
 
