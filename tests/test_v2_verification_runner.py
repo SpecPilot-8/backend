@@ -428,3 +428,41 @@ def test_cancel_running_job_transitions_to_cancelled(linked, monkeypatch):
     assert cancel_again.status_code == 409
 
 
+
+
+def test_unchanged_rerun_reuses_saved_model_responses(linked):
+    c, p, reqs, body, _, calls, _ = linked
+    first, job1 = execute(linked)
+    assert job1["status"] == "completed" and len(calls) == 4
+    second, job2 = execute(linked)
+    assert job2["status"] == "completed", job2
+    assert len(calls) == 4  # 코드·요구사항·모델이 그대로면 모델을 다시 부르지 않는다
+    for stage in ("matching", "condition_judgment"):
+        assert job2["analysis_metrics"][stage]["calls"] == 0
+        assert job2["analysis_metrics"][stage]["reused_calls"] == 2
+        assert job2["analysis_metrics"][stage]["usage"] == {}
+    old = c.get(f"/api/v2/projects/{p}/verification-runs/{first['result_ref']['id']}/requirements/{reqs[0]['id']}").json()
+    new = c.get(f"/api/v2/projects/{p}/verification-runs/{second['result_ref']['id']}/requirements/{reqs[0]['id']}").json()
+    assert [v["status"] for v in new["condition_verdicts"]] == [v["status"] for v in old["condition_verdicts"]]
+    assert [e["file_path"] for e in new["evidence"]] == [e["file_path"] for e in old["evidence"]]
+
+
+def test_response_cache_can_be_disabled_for_variance_runs(linked, monkeypatch):
+    *_, calls, _ = linked
+    execute(linked)
+    monkeypatch.setenv("SPECPILOT_DISABLE_RESPONSE_CACHE", "1")
+    _, job = execute(linked)
+    assert job["status"] == "completed" and len(calls) == 8
+    assert job["analysis_metrics"]["condition_judgment"]["reused_calls"] == 0
+
+
+def test_response_cache_key_changes_with_input_and_model():
+    from api.v2.verification_runner import ResponseCache
+    a = SimpleNamespace(model="m1", effort="high")
+    request = {"instructions": "i", "context": "c", "prompt": "p", "schema": {"type": "object"}}
+    base = ResponseCache.key(a, request)
+    assert base == ResponseCache.key(a, dict(request))
+    assert base != ResponseCache.key(a, {**request, "prompt": "p2"})       # 요구사항·후보가 바뀜
+    assert base != ResponseCache.key(a, {**request, "context": "c2"})      # 근거 코드가 바뀜
+    assert base != ResponseCache.key(SimpleNamespace(model="m2", effort="high"), request)
+    assert base != ResponseCache.key(SimpleNamespace(model="m1", effort="low"), request)
