@@ -127,7 +127,34 @@ def graph_for(builder, allowed_ids, ids, metadata):
     return {'nodes': nodes, 'edges': edges, 'unresolved': warnings}
 
 
-def judge_run(run, snapshot, raw_chunks, client, api_key, root, deliver, progress, metrics, cache=None):
+RETRIEVAL_TOP_K = 30      # 화면 범위 안에서 요구사항마다 고를 후보 수 (docs/retrieval-eval.md)
+RETRIEVAL_OUTSIDE_K = 5   # 다른 화면 코드만 있는 경우를 가리려고 화면 밖에서도 몇 개를 함께 준다
+
+
+def load_retriever():
+    """SPECPILOT_MATCH_STRATEGY=retrieval일 때 청크 목록으로 로컬 임베딩 색인을 만드는 함수를 돌려준다.
+
+    임베딩 라이브러리·모델이 없으면 ImportError/OSError가 나고, 호출한 쪽은 전체 투입으로 돌아간다.
+    """
+    from matcher.retrieve import DenseIndex
+    model = os.environ.get('SPECPILOT_EMBEDDING_MODEL', 'qwen3-0.6b')
+    return lambda rows: DenseIndex(rows, model=model)
+
+
+def retrieval_candidates(index, members, scope, all_ids):
+    """화면의 요구사항마다 범위 안 상위 K개 + 범위 밖 상위 몇 개를 합친다 (본문 + 조건 문장으로 검색)."""
+    queries = {rid: '\n'.join([req['original_text'] or req['title'], *(c['text'] for c in req['conditions'])])
+               for rid, req in members}
+    inside = index.rank_many(queries, {rid: scope for rid in queries})
+    outside = index.rank_many(queries, {rid: all_ids - scope for rid in queries})
+    keep = set()
+    for rid in queries:
+        keep.update(inside[rid][:RETRIEVAL_TOP_K])
+        keep.update(outside[rid][:RETRIEVAL_OUTSIDE_K])
+    return keep
+
+
+def judge_run(run, snapshot, raw_chunks, client, api_key, root, deliver, progress, metrics, cache=None, retriever=None):
     started = perf_counter()
     builder, chunks, ids, metadata = make_builder(snapshot, raw_chunks, run['scope_config'], root)
     reqs = run['requirements']
@@ -136,6 +163,16 @@ def judge_run(run, snapshot, raw_chunks, client, api_key, root, deliver, progres
         groups[req.get('screen_id') or req['subtopic_id']].append((index, req))
     scopes = {key: builder.scope(key).all for key in groups}
     metrics['scope_duration_ms'] = round((perf_counter() - started) * 1000)
+    index = None
+    if retriever is not None:
+        started = perf_counter()
+        try:
+            index = retriever(list(chunks.values()))
+            metrics['strategy'] = 'retrieval'
+            metrics['retrieval'] = {'top_k': RETRIEVAL_TOP_K, 'outside_k': RETRIEVAL_OUTSIDE_K}
+        except Exception as error:  # 모델 미설치 등: 검증은 전체 투입으로 계속한다
+            metrics['retrieval_fallback'] = type(error).__name__
+        metrics['retrieval_duration_ms'] = round((perf_counter() - started) * 1000)
     usage = {'input_tokens': 0, 'output_tokens': 0}
     done = 0
     for group, members in groups.items():
@@ -143,11 +180,18 @@ def judge_run(run, snapshot, raw_chunks, client, api_key, root, deliver, progres
         matchable = [(rid, req) for rid, req in members if any(c['verifiable'] == 'code' for c in req['conditions'])]
         selection, invalid = None, set()
         if matchable:
-            wrapper = ValidatedClient(client, api_key, metrics['matching'], len(chunks), allowed_chunks=list(chunks),
+            if index is not None and group in builder.entries:
+                keep = retrieval_candidates(index, matchable, set(scopes[group]), set(chunks))
+                candidate_ids = [cid for cid in chunks if cid in keep]
+            else:
+                candidate_ids = list(chunks)
+            wrapper = ValidatedClient(client, api_key, metrics['matching'], len(candidate_ids), allowed_chunks=candidate_ids,
                                       requirement_keys=[r['stable_key'] for _, r in matchable], cache=cache)
             progress('matching', done, len(reqs))
+            # 화면별 후보는 다시 읽지 않으므로 캐시 블록이 아니라 프롬프트로 보낸다 (쓰기 할증 방지)
             selection = select_for_screen(wrapper, group, title,
-                [Requirement(rid, req['stable_key'], group, req['original_text'] or req['title']) for rid, req in matchable], list(chunks.values()))
+                [Requirement(rid, req['stable_key'], group, req['original_text'] or req['title']) for rid, req in matchable],
+                [chunks[cid] for cid in candidate_ids], cache_candidates=len(candidate_ids) == len(chunks))
             add_usage(usage, selection.usage)
             keys = [m['requirement_key'] for m in wrapper.data['matches']]
             repeated = {key for key in keys if keys.count(key) > 1}
@@ -288,8 +332,14 @@ def run_verification(database, p, run_id, config):
                         progress={'stage': stage, 'completed': done, 'total': total})
             with TemporaryDirectory(prefix='specpilot-verify-') as folder:
                 cache = None if os.environ.get('SPECPILOT_DISABLE_RESPONSE_CACHE') == '1' else ResponseCache(database, p)
+                retriever = None
+                if os.environ.get('SPECPILOT_MATCH_STRATEGY') == 'retrieval':
+                    try:
+                        retriever = load_retriever()
+                    except ImportError:
+                        metrics['retrieval_fallback'] = 'ImportError'
                 judge_run(run, snapshot, chunks, client, config.llm_api_key, Path(folder), deliver, on_progress, metrics,
-                          cache)
+                          cache, retriever)
         except APIError as error:
             if error.code == 'JOB_CANCELLED':
                 return

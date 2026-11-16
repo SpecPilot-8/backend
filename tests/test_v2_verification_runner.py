@@ -466,3 +466,45 @@ def test_response_cache_key_changes_with_input_and_model():
     assert base != ResponseCache.key(a, {**request, "context": "c2"})      # 근거 코드가 바뀜
     assert base != ResponseCache.key(SimpleNamespace(model="m2", effort="high"), request)
     assert base != ResponseCache.key(SimpleNamespace(model="m1", effort="low"), request)
+
+
+class _FakeIndex:
+    """임베딩 대신 가짜 LLM이 고르는 두 파일을 앞에 둔다. 모델 없이 웹 검색 연결만 확인한다."""
+    def __init__(self, rows):
+        first = ("src/main.js", "src/other.js")
+        self.ids = [r.id for r in sorted(rows, key=lambda r: (not r.file_path.endswith(first), r.id))]
+
+    def rank_many(self, queries, candidates):
+        return {k: [i for i in self.ids if i in candidates[k]] for k in queries}
+
+
+def test_retrieval_strategy_sends_per_screen_candidates_in_prompt(linked, monkeypatch):
+    from api.v2 import verification_runner
+    monkeypatch.setenv("SPECPILOT_MATCH_STRATEGY", "retrieval")
+    monkeypatch.setattr(verification_runner, "load_retriever", lambda: _FakeIndex)
+    monkeypatch.setattr(verification_runner, "RETRIEVAL_TOP_K", 1)
+    monkeypatch.setattr(verification_runner, "RETRIEVAL_OUTSIDE_K", 1)
+    *_, calls, _ = linked
+    _, job = execute(linked)
+    assert job["status"] == "completed", job
+    metrics = job["analysis_metrics"]
+    assert metrics["strategy"] == "retrieval" and metrics["retrieval"] == {"top_k": 1, "outside_k": 1}
+    matching = [v for v in calls if v["schema"]["required"] == ["matches"]]
+    assert matching and all(v["context"] == "" and "<chunk id=" in v["prompt"] for v in matching)
+    full = metrics["matching"]["submitted_chunks"]
+    allowed = [v["schema"]["properties"]["matches"]["items"]["properties"]["chunk_ids"]["items"]["enum"] for v in matching]
+    assert full == sum(len(a) for a in allowed) and all(len(a) <= 4 for a in allowed)  # 요구사항 2개 × (범위 1 + 밖 1)
+    assert all("src/unrelated.js" not in v["prompt"] for v in matching)  # 순위 밖 코드는 후보에서 빠진다
+
+
+def test_retrieval_falls_back_to_all_chunks_when_model_is_missing(linked, monkeypatch):
+    from api.v2 import verification_runner
+
+    def missing():
+        raise ImportError("sentence_transformers")
+    monkeypatch.setenv("SPECPILOT_MATCH_STRATEGY", "retrieval")
+    monkeypatch.setattr(verification_runner, "load_retriever", missing)
+    _, job = execute(linked)
+    assert job["status"] == "completed"
+    assert job["analysis_metrics"]["strategy"] == "all_chunks"
+    assert job["analysis_metrics"]["retrieval_fallback"] == "ImportError"
