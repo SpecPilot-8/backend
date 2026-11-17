@@ -7,7 +7,7 @@
 VS Code 스타일 웹앱의 화면 흐름·목표 기능·완료 조건과 현재 구현 상태는 [기능명세서](docs/FUNCTIONAL_SPEC.md)에 정리했다.
 현재 API와 새 UI를 위한 v2 개발 계약은 [API 명세서](docs/API_SPEC.md), 문서 분석·코드 분석 팀원의 요구 기능과 인계 데이터는 [모델 개발 담당 명세](docs/MODEL_TEAM_GUIDE.md)를 따른다. 기획서 파싱 담당에게 먼저 전달할 추출 범위·기능명세 연결·요청문은 [개발·인계 체크리스트](docs/PARSER_HANDOFF_CHECKLIST.md), 출력 형식·주제/소주제 구조·예제는 [기획서 파싱 출력 계약](docs/PARSER_OUTPUT_SPEC.md)에 정리했다. 실제 PDF 구조와 제공된 Excel 형식에 맞춘 단계별 시험·결과 출력은 [테스트 출력 계약](docs/TEST_OUTPUT_SPEC.md)을 따른다.
 
-실제 v2 개발 범위·모델 미연결 API·추가 작업은 [구현·연동 상태](docs/IMPLEMENTATION_STATUS.md)를 따른다.
+실제 v2 개발 범위·미구현 API·추가 작업은 [구현·연동 상태](docs/IMPLEMENTATION_STATUS.md)를 따른다.
 
 최신 검증: [LLM 호출 제외 MVP 통합 점검](docs/INTEGRATION_TEST_REPORT.md).
 
@@ -25,18 +25,27 @@ python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 Swagger: <http://127.0.0.1:8000/docs>. 새 기능·지원 범위·한도는 `/api/v2/capabilities`에서 확인한다. 기존 `/api/v1`은 유지한다.
 기본 DB는 `.data/api.sqlite3`이며 `SPECPILOT_DATABASE_URL`로 PostgreSQL URL을 설정할 수 있다.
 원본은 `.data/uploads/`, 출력은 `.data/artifacts/`에 저장한다. `SPECPILOT_DATA_DIR`로 데이터 경로, `SPECPILOT_WORKSPACE_ROOT`로 로컬 코드의 허용 루트를 지정한다.
-HTTP AI 호출은 연결하지 않았으며 키를 저장하지 않는다. 일본어 번역은 제외한다. MVP는 모델 하나를 사용하고, 지원 프로필·키를 통한 여러 모델 전환은 후속 확장이다.
 v2의 `api_v2_*` 테이블은 기존 v1/CLI 테이블과 분리한다. 앱 시작 시 가산 마이그레이션을 적용하며 기존 데이터를 자동 변환하지 않는다. 현재는 로컬 개발용이며 인증·운영 배포 마이그레이션 단일 실행·운영 DB 검증이 필요하다.
 
-현재 구현 범위:
+현재 웹에서 실행되는 흐름 (서버 `.env`의 모델 하나를 사용):
 
-- v2 프로젝트·모델 상태·작업 저장/조회, PDF 기본 텍스트 파싱과 좌표·부분/실패 경고
-- 요구사항 수동 작성·검토·개정 이력, ZIP/로컬 코드 청킹·불변 스냅샷
-- 검증 접수·미분석 추적표/통계/상세, 모델 출력 계약 검증 및 저장 경계
-- 단계별 시험 수동 작성·절차 개정·수행 회차·원자적 표 배치 저장·충돌/재시도
-- 추적표 및 제공 양식의 테스트 사양서 Excel 출력·프로젝트별 다운로드
+- 프로젝트·문서 업로드, 화면 표 PDF 파싱(좌표·OCR 경고), 요구사항 자동 추출·수동 작성·검토·개정 이력
+- ZIP/로컬 코드 청킹·불변 스냅샷, 스냅샷 원본 파일 조회(VS Code 확장의 코드 복원용)
+- 코드 검증: 화면 범위 계산 → 매칭 → 규칙 판정 → LLM 조건 판정, 단계별 토큰·시간 기록(`analysis_metrics`), 작업 취소
+- 시험 사양서 자동 생성·수동 편집·설계 관점 점검, 추적표·제공 양식 테스트 사양서 Excel 출력
 
-자동 요구사항 추출·코드 판정·시험 생성은 모델 미연결로 blocked다. 모델 키 저장·설정 변경·연결 확인은 501이다. 정확한 경로·후속 담당과 현재 가능한 수동 흐름은 [구현·연동 상태](docs/IMPLEMENTATION_STATUS.md)를 확인한다. 기능별 PR은 의존 순서대로 기존 커밋을 보존하여 main에 병합했다.
+모델 키 저장·여러 모델 전환은 501이다(비밀 저장소 연동 필요). 정확한 경로·후속 담당은 [구현·연동 상태](docs/IMPLEMENTATION_STATUS.md)를 확인한다.
+
+주요 환경변수 (`.env.example` 참고):
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `SPECPILOT_LLM_PROVIDER` / `SPECPILOT_LLM_MODEL` | `anthropic` / `claude-opus-5` | 서버가 쓰는 모델 |
+| `SPECPILOT_LLM_EFFORT` | `high` | Anthropic 사고량. 낮추면 싸지만 결함을 더 놓친다 ([docs/effort-eval.md](docs/effort-eval.md)) |
+| `SPECPILOT_MATCH_STRATEGY` | 전체 투입 | `retrieval`이면 웹 검증 매칭 후보를 로컬 임베딩 검색으로 줄인다 ([docs/retrieval-eval.md](docs/retrieval-eval.md)) |
+| `SPECPILOT_EMBEDDING_MODEL` | `qwen3-0.6b` | 검색용 로컬 임베딩 모델 (`sentence-transformers` 필요, 없으면 전체 투입) |
+| `SPECPILOT_DISABLE_RESPONSE_CACHE` | 켜짐 | `1`이면 같은 입력의 응답 재사용을 끈다 ([docs/response-cache.md](docs/response-cache.md)) |
+| `SPECPILOT_DSN` | `dbname=specpilot` | CLI 파이프라인 DB. 다른 샘플은 DB를 나눠 쓴다 |
 
 검증: `python -m pytest -q`, `python -m ruff check api services tests`.
 
@@ -56,7 +65,8 @@ flowchart LR
     F --> G[4. 위치 태그<br/>이 화면 / 다른 화면 / 도달 불가]
     C --> H[6. 판정<br/>조건별 상태 → 요구사항 집계]
     G --> H
-    H --> I[7. 추적표 xlsx<br/>테스트 사양서는 미구현]
+    H --> I[7. 추적표 xlsx]
+    C --> J[시험 사양서 생성<br/>기획서만 사용]
 ```
 
 | # | 단계 | 하는 일 | 결과 테이블 | LLM |
@@ -74,9 +84,11 @@ flowchart LR
 | 단계 | 상태 |
 |---|---|
 | 1 ~ 5 | 완료. 씽크트리 샘플(Spring, React) 기준으로 실행 결과가 DB에 있음 |
-| 6 판정 | 두 레포 전체 실행 완료. 다만 재실행 시 약 14%가 바뀔 만큼 흔들림 |
-| 7 출력 | 요구사항 추적표 완료. 씽크트리 견본 형식의 테스트 사양서는 미착수 (시험절차·계정·입력값 생성 필요) |
-| 정확도 평가 (골든셋) | 두 레포 전체 480개 조건 정답 완료(샘플 앱 실행 확인). 점수는 `docs/golden-score.md` |
+| 6 판정 | 두 레포 전체 실행 완료. 다만 재실행 시 약 14%가 바뀔 만큼 흔들림. 같은 입력은 `input_hash`로 재사용 |
+| 7 출력 | 요구사항 추적표 완료. 시험 사양서는 `testgen/`(웹과 CLI `scripts/generate_tests_v2.py`)에서 생성 |
+| 정확도 평가 (골든셋) | 두 레포 전체 480개 조건 정답 완료. 점수·상태별 정밀도·재현율은 `docs/golden-score.md` |
+| 일반화 확인 | 팀원이 만든 타이머 샘플(정답지 포함)로 판정 확인, `docs/timer-sample-eval.md` |
+| 검색 후보 축소 | 임베딩 4종 비교·Qwen3 채택, 매칭 입력 -73~81%·정확도 유지(화면 2개), `docs/retrieval-eval.md` |
 | 로컬 LLM 전환 | 미착수. 사용자 PC 사양·모델 미정 |
 
 ## 기존 CLI 설치
@@ -170,6 +182,9 @@ LLM 단계는 실행마다 비용이 든다. 샘플 기준 매칭 약 $0.5~0.6 (
 - 화면 하나당 LLM 호출 하나. 레포 청크 전체를 후보로 주고, 요구사항마다 관련 청크의 **id만 고르게** 한다.
   LLM이 파일 경로나 줄 번호를 만들어내지 못하게 하려는 것이다 (CLAUDE.md 원칙1)
 - 응답은 형식이 맞아도 다시 검증한다. 후보에 없는 id, 빠뜨린 요구사항은 `match_issue`에 남긴다
+- `scripts/run_match.py retrieval <repo> --top-k 30`: 화면 범위 안에서 요구사항마다 로컬 임베딩 상위 K개만 후보로 준다.
+  화면별 후보는 캐시 블록이 아니라 프롬프트로 보낸다(캐시 쓰기 할증 방지). 효과 측정은 `scripts/measure_retrieval_cost.py`,
+  임베딩 모델 비교는 `scripts/compare_embeddings.py`
 
 ### 4. 위치 태그 (`matcher/scope/`, `scripts/tag_scope.py`)
 
@@ -258,13 +273,16 @@ python scripts/golden.py score --runs spring-sample=11 react-sample=12   # 특�
 ```
 extractor/      기획서 PDF 파서
 chunker/        언어별 코드 청커 (Java, JS/JSX, Thymeleaf)
+api/            FastAPI 서버 (v2: 웹앱 API와 매칭·판정·시험 생성 실행기)
+adapters/       파이프라인 결과 ↔ v2 API 계약 변환
 llm/            LLM 호출 (백엔드 교체는 여기만)
 matcher/        요구사항 ↔ 코드 매칭, scope/ 는 화면 범위 규칙
 decomposer/     요구사항 → 하위 조건 분해, 원문 인용 대조
 verdict/        판정 규칙(rules.py)과 LLM 판정(judge.py)
+testgen/        시험 사양서 생성(generate.py), 설계 관점(design.py), 품질 점검(quality.py)
 db/             스키마와 적재 스크립트
 scripts/        단계별 실행 스크립트
-docs/           라벨 정의서
+docs/           명세·라벨 정의서·측정 기록
 output/         추적표 xlsx (git 제외)
 ```
 
@@ -284,6 +302,8 @@ output/         추적표 xlsx (git 제외)
   확인했고, 라벨이나 테두리가 없는 다른 양식에서는 감지에 실패해 검수 대상(needs_review)으로 올라간다
 - OCR 신뢰도가 높아도 오독이 있다 ("마이페이지" → "파이페이지"가 신뢰도 0.948). 신뢰도만으로 거르지 못한다
 - 입력은 PDF만 된다. PPTX·Word·Excel 파서는 아직 없다
+- 한 쪽에 화면 하나인 화면설계서 양식만 파서가 나눈다. 한 쪽에 화면이 여러 개인 양식(타이머 샘플)은 요구사항을
+  `db/load_requirements.py`로 사람이 옮겨 넣는다
 - yml/properties는 파일 전체가 청크 하나다. 키 단위 분리는 값 비교 규칙엔진이 필요해지면 한다
 - 테스트 코드와 CSS는 청킹하지 않는다. 테스트에 언급됐다고 구현됨이 나오면 오탐이고, CSS는 검증 불가 영역이다
 - LLM 결과는 같은 입력에도 실행마다 다르다. 판정 프롬프트를 바꿔 전체를 다시 돌렸을 때 요구사항 206건 중 28건이
