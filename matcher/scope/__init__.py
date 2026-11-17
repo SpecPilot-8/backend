@@ -17,7 +17,7 @@ from matcher.data import ChunkRow
 from matcher.scope import react, spring
 from matcher.scope.graph import Graph, build_identifier_edges
 
-_STACKS = {"spring-sample": spring, "react-sample": react}
+_STACKS = {"spring-sample": spring, "react-sample": react, "timer-react": react}
 _ENTRIES_DIR = Path(__file__).parent / "entries"
 
 

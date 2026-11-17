@@ -3,6 +3,7 @@
 같은 stable_key가 이미 있으면 덮어쓴다 (기획서 재파싱 시 최신 결과로 갱신).
 """
 
+import os
 import json
 import re
 import sys
@@ -13,7 +14,8 @@ import psycopg
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from extractor.pdf_screens import parse_pdf
 
-DSN = "dbname=specpilot"
+# 다른 기획서·샘플을 기존 결과와 섞지 않으려면 SPECPILOT_DSN으로 DB를 바꾼다
+DSN = os.environ.get("SPECPILOT_DSN", "dbname=specpilot")
 
 
 def guess_doc_version(path: str) -> str | None:
