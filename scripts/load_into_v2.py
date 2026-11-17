@@ -31,7 +31,10 @@ from matcher.data import connect
 from db.load_code import chunk_repo
 
 REPO = Path(__file__).resolve().parent.parent
-STACKS = {"spring": ("spring-sample", "Spring Boot"), "react": ("react-sample", "React + Express")}
+STACKS = {"spring": ("spring-sample", "Spring Boot"), "react": ("react-sample", "React + Express"),
+          # 팀원이 만든 타이머 샘플. 파이프라인 DB가 따로라 SPECPILOT_DSN="dbname=specpilot_timer"로 실행한다
+          "timer": ("timer-react", "React")}
+PROJECT_NAMES = {"timer": "타이머 샘플 ({label})"}
 
 
 def _rows(conn, sql, params=()):
@@ -97,7 +100,8 @@ def load_stack(client: TestClient, conn, stack: str) -> None:
         pdf = REPO / pdf
     base = "/api/v2/projects"
 
-    project = _ok(client.post(base, json={"name": f"씽크트리 샘플 ({label})", "workspace_path": str(code_root)}))
+    name = PROJECT_NAMES.get(stack, "씽크트리 샘플 ({label})").format(label=label)
+    project = _ok(client.post(base, json={"name": name, "workspace_path": str(code_root)}))
     p = project["id"]
     with pdf.open("rb") as f:
         doc = _ok(client.post(f"{base}/{p}/documents", files={"file": (pdf.name, f, "application/pdf")}))
@@ -157,7 +161,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--stack", choices=[*STACKS, "all"], default="all")
     args = ap.parse_args()
-    stacks = list(STACKS) if args.stack == "all" else [args.stack]
+    stacks = ["spring", "react"] if args.stack == "all" else [args.stack]
     with connect() as conn, TestClient(create_app()) as client:
         for stack in stacks:
             load_stack(client, conn, stack)

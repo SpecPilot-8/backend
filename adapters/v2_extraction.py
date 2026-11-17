@@ -27,8 +27,17 @@ EXTRACTION_VERSION = "2.2"
 _PAREN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
-def _block_id(page: int, section: str, label: str | None = None) -> str:
-    return f"p{page:02d}-{section}" + (f"-{label}" if label is not None else "")
+def _block_id(page: int, section: str, label: str | None = None, screen: str | None = None) -> str:
+    # 한 쪽에 화면이 여러 개인 양식은 화면 ID를 넣어 블록 이름이 겹치지 않게 한다.
+    # 한 쪽에 화면 하나인 기존 기획서는 예전 이름(p01-header 등)을 그대로 쓴다.
+    prefix = f"p{page:02d}" + (f"-{screen}" if screen else "")
+    return f"{prefix}-{section}" + (f"-{label}" if label is not None else "")
+
+
+def _shared_pages(screens: list[dict]) -> dict[str, str | None]:
+    """화면 ID → 블록 이름에 넣을 화면 ID(같은 쪽에 다른 화면이 있을 때만)."""
+    per_page = Counter(s["page_index"] for s in screens)
+    return {s["screen_id"]: s["screen_id"] if per_page[s["page_index"]] > 1 else None for s in screens}
 
 
 def _xywh(bbox) -> list[float] | None:
@@ -50,6 +59,7 @@ def build_artifact(document_id: str, document_revision: int, content_hash: str,
         reqs_by_screen[r["screen_id"]].append(r)
 
     blocks, order = [], 0
+    shared = _shared_pages(screens)
     for s in sorted(screens, key=lambda s: s["page_index"]):
         page = s["page_index"] + 1  # v2 API는 1부터 센다
         order += 1
@@ -58,7 +68,7 @@ def build_artifact(document_id: str, document_revision: int, content_hash: str,
         if ocr_fields:
             warnings.append({"code": "OCR_SOURCE_REVIEW", "message": "OCR 헤더는 원문 대조가 필요합니다: " + ", ".join(ocr_fields)})
         blocks.append({
-            "id": _block_id(page, "header"),
+            "id": _block_id(page, "header", screen=shared[s["screen_id"]]),
             "location": {"kind": "page", "index": page},
             "text": _header_text(s),
             "extraction_method": "ocr" if ocr_fields else "text",
@@ -75,7 +85,7 @@ def build_artifact(document_id: str, document_revision: int, content_hash: str,
             if (xywh := _xywh(r["bbox"])) is not None:
                 location["bbox"] = xywh
             blocks.append({
-                "id": _block_id(page, r["kind"], r["seq_label"]),
+                "id": _block_id(page, r["kind"], r["seq_label"], shared[s["screen_id"]]),
                 "location": location,
                 "text": r["body"],
                 "extraction_method": "text",
@@ -112,7 +122,8 @@ def build_extraction(artifact: dict, screens: list[dict], requirements: list[dic
     """conditions: requirement_condition 행 + requirement_key (최신 분해 실행)."""
     by_screen = {s["screen_id"]: s for s in screens}
     page_of = {sid: s["page_index"] + 1 for sid, s in by_screen.items()}
-    header_of = {sid: _block_id(p, "header") for sid, p in page_of.items()}
+    shared = _shared_pages(screens)
+    header_of = {sid: _block_id(p, "header", screen=shared[sid]) for sid, p in page_of.items()}
     conds_by_req = defaultdict(list)
     for c in conditions:
         conds_by_req[c["requirement_key"]].append(c)
@@ -190,7 +201,7 @@ def build_extraction(artifact: dict, screens: list[dict], requirements: list[dic
 
     reqs_out = []
     for r in sorted(requirements, key=lambda r: (page_of[r["screen_id"]], r["kind"] != "description", r["stable_key"])):
-        block = _block_id(page_of[r["screen_id"]], r["kind"], r["seq_label"])
+        block = _block_id(page_of[r["screen_id"]], r["kind"], r["seq_label"], shared[r["screen_id"]])
         screen = by_screen[r["screen_id"]]
         reasons = list(screen["review_reasons"] or [])
         conds = []
