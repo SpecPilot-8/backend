@@ -1,3 +1,9 @@
+# - 담당 파트: 백엔드 분석 파이프라인 / 웹 API 연동
+# - 작성자: 정래원
+# - 페이지 개요: 기획서 파싱과 조건 분해 결과를 v2 계약 JSON으로 내보내고 검증하는 스크립트
+# - 주요 기능:
+#   1) 계약 JSON 출력과 검증
+
 """기획서 파싱·조건 분해 결과를 v2 API 계약 JSON으로 내보내고 계약 검증을 돌린다 (LLM 호출 없음).
 
     python scripts/export_v2_extraction.py --document-id <v2 문서 id> [--revision 1]

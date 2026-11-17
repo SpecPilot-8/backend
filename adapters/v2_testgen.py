@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 분석 파이프라인 / 웹 API 연동
+# - 작성자: 정래원
+# - 페이지 개요: 시험 시나리오를 v2 시험 생성 계약으로 바꾸는 변환 모듈
+# - 주요 기능:
+#   1) Excel 시트 구분 결정
+#   2) 시험과 단계의 요구사항 연결 변환
+
 """조건 키 기반 시험 시나리오(testgen/generate.py)를 v2 시험 생성 계약(2.1)으로 바꾼다 (LLM 호출 없음).
 
 계약은 docs/schemas/test-generation.schema.json, 저장은 api/v2/test_generation_adapter.py.

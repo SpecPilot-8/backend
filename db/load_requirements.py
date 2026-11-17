@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 분석 파이프라인 / 기획서 파싱
+# - 작성자: 정래원
+# - 페이지 개요: 파서가 읽지 못하는 양식의 기획서를 사람이 옮긴 JSON으로 적재하는 스크립트
+# - 주요 기능:
+#   1) JSON의 화면과 요구사항을 screen, requirement 테이블에 저장
+#   2) 추출과 판정을 따로 재기 위한 수동 입력 경로
+
 """파서가 읽지 못하는 양식의 기획서를 사람이 옮긴 JSON으로 screen/requirement에 적재한다.
 
     SPECPILOT_DSN="dbname=specpilot_timer" python db/load_requirements.py requirements.json
