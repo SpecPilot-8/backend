@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 분석 파이프라인 / 화면 범위
+# - 작성자: 정래원
+# - 페이지 개요: Spring MVC와 Thymeleaf 스택의 화면 범위 규칙
+# - 주요 기능:
+#   1) 화면 URL과 뷰 템플릿에서 Controller, Service, Repository까지 연결
+#   2) 설정 파일 등 모든 화면이 공유하는 코드 지정
+
 """Spring MVC + Thymeleaf 스택의 화면 범위 규칙."""
 
 import re

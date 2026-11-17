@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 분석 파이프라인 / 조건 분해
+# - 작성자: 정래원
+# - 페이지 개요: 기존 조건의 정적 검증 가능 여부만 현재 기준으로 다시 매기는 스크립트
+# - 주요 기능:
+#   1) 골든셋 연결을 유지한 채 재분류
+#   2) 바뀐 내역을 verifiable_change에 기록
+
 """기존 조건의 verifiable만 현재 기준(decomposer/decompose.py VERIFIABLE_CRITERIA)으로 다시 매긴다 (LLM 호출).
 
     python scripts/reclassify_verifiable.py --dry-run     # 바뀔 조건만 출력

@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 분석 파이프라인 / 근거 매칭
+# - 작성자: 정래원
+# - 페이지 개요: 매칭 실행과 결과를 DB에 저장하는 모듈
+# - 주요 기능:
+#   1) 매칭 실행 기록 생성
+#   2) 요구사항별로 고른 근거와 검증 이슈 저장
+
 import json
 
 from matcher.select import PROMPT_VERSION, ScreenSelection

@@ -1,3 +1,9 @@
+# - 담당 파트: 백엔드 분석 파이프라인 / 코드 분할
+# - 작성자: 정래원
+# - 페이지 개요: Thymeleaf 템플릿을 Tree-sitter로 파싱해 form, table 같은 블록 단위로 나누는 청커
+# - 주요 기능:
+#   1) 화면 마크업 블록 단위 청크 생성
+
 """HTML(Thymeleaf 템플릿)을 tree-sitter로 파싱해 블록 단위 chunk로 쪼갠다.
 
 Spring 샘플의 UI 검증(예: 제목 `maxlength="50"`)은 Java가 아니라 템플릿에만

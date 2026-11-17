@@ -1,3 +1,9 @@
+# - 담당 파트: 백엔드 분석 파이프라인 / 기획서 파싱
+# - 작성자: 정래원
+# - 페이지 개요: 기획서 PDF 파싱 결과를 JSON으로 출력하는 확인용 스크립트
+# - 주요 기능:
+#   1) 화면과 요구사항 파싱 결과 출력
+
 import json
 import sys
 from pathlib import Path

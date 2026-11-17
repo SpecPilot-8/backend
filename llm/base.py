@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 분석 파이프라인 / LLM 호출
+# - 작성자: 정래원
+# - 페이지 개요: 파이프라인이 공통으로 쓰는 LLM 클라이언트 인터페이스와 응답 구조
+# - 주요 기능:
+#   1) LLMClient 인터페이스 정의
+#   2) 응답 데이터, 원문, 사용량, 오류를 담는 LLMResponse 정의
+
 from dataclasses import dataclass, field
 from typing import Protocol
 
