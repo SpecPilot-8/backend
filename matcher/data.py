@@ -1,10 +1,12 @@
 """매칭에 필요한 DB 조회."""
 
+import os
 from dataclasses import dataclass
 
 import psycopg
 
-DSN = "dbname=specpilot"
+# 다른 기획서·샘플을 기존 결과와 섞지 않으려면 SPECPILOT_DSN으로 DB를 바꾼다
+DSN = os.environ.get("SPECPILOT_DSN", "dbname=specpilot")
 
 
 @dataclass(frozen=True)
