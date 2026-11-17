@@ -32,3 +32,25 @@ def test_screen_candidates_unions_top_k_per_requirement():
     ranked = {1: [10, 11, 12], 2: [12, 13, 14], 3: [99]}
     assert screen_candidates(ranked, [1, 2], 2) == {10, 11, 12, 13}
     assert screen_candidates(ranked, [1, 4], 5) == {10, 11, 12}  # 순위가 없는 요구사항은 건너뛴다
+
+
+def test_per_screen_candidates_go_to_prompt_not_cached_context():
+    from llm.base import LLMResponse
+    from matcher.data import ChunkRow, Requirement
+    from matcher.select import select_for_screen
+
+    class Fake:
+        model = "fake"
+
+        def complete_json(self, **kw):
+            self.kw = kw
+            return LLMResponse({"matches": [{"requirement_key": "R-1", "chunk_ids": [7]}]}, "", "fake", {})
+
+    chunks = [ChunkRow(7, "method", "A.java", "A.a", "int a;")]
+    reqs = [Requirement(1, "R-1", "S-1", "본문")]
+    client = Fake()
+    sel = select_for_screen(client, "S-1", "화면", reqs, chunks, cache_candidates=False)
+    assert client.kw["context"] == "" and '<chunk id="7"' in client.kw["prompt"]
+    assert sel.picks == {1: [7]}
+    select_for_screen(client, "S-1", "화면", reqs, chunks)
+    assert '<chunk id="7"' in client.kw["context"] and '<chunk id="7"' not in client.kw["prompt"]

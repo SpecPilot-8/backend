@@ -91,13 +91,24 @@ def select_for_screen(
     reqs: list[Requirement],
     candidates: list[ChunkRow],
     context: str | None = None,
+    cache_candidates: bool = True,
 ) -> ScreenSelection:
-    """context를 넘기면 그대로 쓴다 (여러 화면이 같은 후보 목록을 공유할 때 캐시 적중용)."""
-    context = context if context is not None else render_chunks(candidates)
+    """context를 넘기면 그대로 쓴다 (여러 화면이 같은 후보 목록을 공유할 때 캐시 적중용).
+
+    cache_candidates=False면 후보 목록을 캐시 블록(context)이 아니라 사용자 프롬프트에 넣는다.
+    화면마다 후보가 다른 방식(screen_scope, retrieval)은 같은 목록을 다시 읽을 일이 없어서,
+    캐시에 넣으면 읽기 할인(0.1배)은 못 받고 쓰기 할증(1.25배)만 낸다.
+    """
+    screen_prompt = render_screen(screen_id, screen_name, reqs)
+    if cache_candidates:
+        context = context if context is not None else render_chunks(candidates)
+        prompt = screen_prompt
+    else:
+        context, prompt = "", render_chunks(candidates) + "\n\n" + screen_prompt
     resp = client.complete_json(
         instructions=INSTRUCTIONS,
         context=context,
-        prompt=render_screen(screen_id, screen_name, reqs),
+        prompt=prompt,
         schema=SCHEMA,
     )
     sel = ScreenSelection(screen_id, len(candidates), error=resp.error,
