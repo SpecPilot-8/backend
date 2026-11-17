@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from api.main import create_app
-from api.v2.migrations import upgrade
+from api.database import upgrade
 
 
 def test_stack_saved_restored_and_legacy_updates_preserve_it(client, config):

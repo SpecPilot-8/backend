@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: v2 소스코드 업로드, 로컬 경로 인덱싱 및 스냅샷·청크 관리 API
+# - 주요 기능:
+#   - ZIP 아카이브 업로드 및 지원 확장자·UTF-8 인코딩 검증 처리
+#   - 코드/텍스트 청킹 기반 불변 스냅샷 생성, 파일 목록·청크 검색 조회 제공
+
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path, PurePosixPath
@@ -57,6 +64,7 @@ def source_files(content, config):
             for entry in infos:
                 name = entry.filename
                 path = PurePosixPath(name)
+                # 경로 탈출, 심볼릭 링크, 드라이브 문자, 중복 경로, 과도한 압축률로 인한 Zip Bomb 공격을 차단한다.
                 if not name or '\\' in name or path.is_absolute() or '..' in path.parts or any(':' in part for part in path.parts) or stat.S_ISLNK(entry.external_attr >> 16):
                     raise APIError(422, 'UNSAFE_ARCHIVE', 'ZIP에 안전하지 않은 경로나 링크가 있습니다')
                 if entry.is_dir():
@@ -85,6 +93,7 @@ def source_files(content, config):
 
 def local_files(root, config):
     files, size, count = {}, 0, 0
+    # 심볼릭 링크 추적과 허용 루트 바깥 파일 읽기를 막은 상태로 지원 소스만 수집한다.
     for directory, dirs, names in os.walk(root, followlinks=False):
         dirs[:] = sorted(d for d in dirs if d not in IGNORED and not d.startswith('._'))
         if any((Path(directory) / d).is_symlink() for d in dirs):
@@ -149,6 +158,7 @@ def chunk_file(path, text):
     parser = {'.java': chunk_java_file, '.js': chunk_js_file, '.jsx': chunk_js_file,
               '.html': chunk_html_file, '.htm': chunk_html_file}.get(Path(path).suffix.lower())
     chunks = []
+    # Tree-sitter 기반 구문 파서 전역 상태를 보호하기 위해 파서 호출 직전에만 락을 잡고, 결과 없으면 텍스트 청킹으로 폴백한다.
     if parser:
         with _PARSER_LOCK:
             chunks = parser(path, text)
@@ -183,6 +193,7 @@ def index(p: str, body: IndexRequest, db: DB, config: Config):
         base = Path(value.workspace_path).resolve()
         relative = Path(body.relative_path)
         root = (base / relative).resolve()
+        # 상대 경로가 프로젝트 워크스페이스와 서버 허용 루트 바깥으로 벗어나지 않도록 이중 검증한다.
         if relative.is_absolute() or not root.is_relative_to(base) or not root.is_relative_to(config.workspace_root) or not root.is_dir():
             raise APIError(422, 'WORKSPACE_OUTSIDE_ALLOWED_ROOT', '코드 경로가 허용된 프로젝트 범위 밖에 있습니다')
         files, kind = local_files(root, config), 'workspace'
@@ -190,6 +201,7 @@ def index(p: str, body: IndexRequest, db: DB, config: Config):
     for path, text in sorted(files.items()):
         digest.update(path.encode() + b'\0' + text.encode() + b'\0')
     content_hash = digest.hexdigest()
+    # 소스 해시와 청킹 버전이 동일한 스냅샷이 이미 있으면 중복 청킹하지 않고 기존 불변 스냅샷을 재사용한다.
     existing = next((s for s in all_resources(db, p, 'snapshot') if s.data['content_hash'] == content_hash
                      and s.data.get('chunking_version') == CHUNKING_VERSION), None)
     if existing:

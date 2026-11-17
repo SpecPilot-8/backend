@@ -1,3 +1,10 @@
+# - 담당 파트: 테스트 사양서
+# - 작성자: 이성규
+# - 페이지 개요: 저장된 테스트 사양서의 경계값·중복·원문 기반 문구 품질 검증 모듈
+# - 주요 기능:
+#   - 수치 제약 조건 파싱 및 시험 절차 내 경계 정확값·초과·미만 값 포함 여부 점검
+#   - 동일 단계·시나리오 중복과 기획서 원문에 없는 인용 안내 문구 탐지
+
 """저장된 시험 사양서가 요구사항을 실제로 검증하는지 규칙으로 점검한다 (LLM 호출 없음, #106).
 
 design.py는 단계가 '경계값 관점'에 연결됐는지만 센다. 그래서 최대 50자 조건에 20자만 넣는 단계도
@@ -45,6 +52,7 @@ class Limit:
 
 
 def parse_limit(text: str) -> Limit | None:
+    # 본문에서 수량·단위 경계 표현과 최소·최대 성격을 추출해 Limit 구조체로 정규화
     m = _LIMIT.search(text)
     if not m:
         return None
@@ -69,10 +77,12 @@ def covered(limit: Limit, texts: list[str]) -> set[str]:
             if _unit(unit) != limit.unit:
                 continue
             v = float(raw)
+            # 경계와 같은 수치면 정확값, 최대 초과나 최소 미만 수치면 바깥 커버리지로 집계
             if v == limit.value:
                 found.add('exact')
             elif (limit.kind == 'max' and v > limit.value) or (limit.kind == 'min' and v < limit.value):
                 found.add('outside')
+        # 최솟값이 1인 제약은 빈 값 입력 시나리오도 경계 바깥 검증으로 인정
         if limit.kind == 'min' and limit.value == 1 and _EMPTY.search(text):
             found.add('outside')  # 1글자 이상의 바깥은 빈 값
     return found
@@ -110,6 +120,7 @@ def check(requirements: list[dict], tests: list[dict]) -> Report:
     경계값은 요구사항 단위로 본다. 한 요구사항이 '8자리 이상'과 '미달 시 에러'처럼 같은 제한을 여러
     조건으로 나눠 갖는 것이 보통이라, 조건 하나에 연결된 단계만 보면 멀쩡한 시험도 누락으로 잡힌다.
     """
+    # 요구사항 원문과 조건-요구사항 역참조 테이블을 구성해 인용 검증과 경계 집계에 재사용
     req_of, req_text = {}, {}
     for req in requirements:
         req_text[req['stable_key']] = _norm(req.get('original_text')) + ''.join(
@@ -134,6 +145,7 @@ def check(requirements: list[dict], tests: list[dict]) -> Report:
             data = step.get('test_data') or {}
             in_test[(_norm(step.get('action')), _norm(data.get('input')), _norm(step.get('expected')))].append(where)
 
+            # 기대 결과의 인용 문구가 요구사항 원문과 맞는지 검사해 임의 창작이나 타 요구사항 문구 차용 탐지
             for groups in _QUOTED.findall(step.get('expected') or ''):
                 raw = groups[0] or groups[1]
                 message = _norm(raw)
@@ -157,6 +169,7 @@ def check(requirements: list[dict], tests: list[dict]) -> Report:
         if len(titles) > 1:
             report.duplicates.append({'kind': 'whole_test', 'count': len(titles), 'where': titles})
 
+    # 요구사항별 경계 조건 커버리지 누락 여부를 검사해 최종 품질 보고서에 취합
     for req in requirements:
         key = req['stable_key']
         limits = {limit for c in req.get('conditions', []) if (limit := parse_limit(c.get('text', '')))}

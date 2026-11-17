@@ -1,9 +1,16 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: v2 요구사항-소스코드 검증 실행·추적표·통계·상세 조회 API 라우터
+# - 주요 기능:
+#   - 검증 대상 고정 준비, AI 코드 검증 비동기 접수 및 모델 연결 확인
+#   - 검증 실행 목록, 요구사항별 추적표, 상태 요약 및 코드 근거 상세 제공
+
 from copy import deepcopy
 from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import Field
 from typing import Literal
 from api.errors import APIError
-from api.v2.common import DB, Config, Input, Limit, Offset, make_job, missing, job_out
+from api.v2.common import DB, Config, Input, Limit, Offset, QUEUE_LOCK, job_out, make_job, missing
 from api.v2.storage import all_resources, create, page, project, public, resource
 
 router = APIRouter(prefix='/api/v2/projects/{p}/verification-runs', tags=['v2 검증·추적표'])
@@ -29,6 +36,7 @@ class RunRequest(Input):
 
 
 def fixed_input(p, body, db):
+    # 검증 시작 시점의 요구사항·조건과 주제/소주제 메타데이터를 불변 스냅샷으로 고정해 이후 편집과 분리한다.
     snap = resource(db, p, body.snapshot_id, 'snapshot')
     if snap.data['status'] != 'ready':
         raise APIError(409, 'SNAPSHOT_NOT_READY', '코드 스냅샷을 먼저 준비하세요')
@@ -69,13 +77,13 @@ def verify(p: str, body: RunRequest, db: DB, settings: Config, request: Request,
         validate_scope(scope, scope_options(db, p, snap, fixed, getattr(config, 'tech_stack', 'auto')))
     needed = [] if enabled else missing('model_connection', '서버 모델 연결을 설정하고 화면 진입 파일을 확인하세요')
     from api.v2.verification_runner import PROMPT_VERSION, RULES_VERSION, run_verification
-    from api.v2.extraction_runner import QUEUE_LOCK
     run = create(db, p, 'verification_run', {'snapshot_id': snap.id, 'requirement_versions': [x.model_dump() for x in body.requirement_versions],
                   'model_config_snapshot': {'profile_id': config.profile_id, 'config_version': config.config_version,
                                             'provider': settings.llm_provider, 'model': settings.llm_model},
                   'scope_config': scope,
                   'prompt_version': PROMPT_VERSION, 'rules_version': RULES_VERSION, 'status': 'queued' if enabled else 'blocked', 'missing_features': needed,
                   'requirements': fixed, 'results': {}})
+    # 모델 미설정 시 blocked 기록만 남기고, 설정된 경우 중복 검증 실행을 큐 락으로 차단한다.
     with QUEUE_LOCK:
         if enabled and any(j.data['operation'] == 'verify' and j.data['status'] in ('queued', 'running') for j in all_resources(db, p, 'job')):
             raise APIError(409, 'VERIFICATION_IN_PROGRESS', '이 프로젝트의 코드 검증이 진행 중입니다. 진행 상태를 확인하세요')

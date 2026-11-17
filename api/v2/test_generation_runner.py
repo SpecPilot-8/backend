@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 API / 테스트 사양서
+# - 작성자: 이성규
+# - 페이지 개요: 검증 완료된 요구사항·조건 기반 AI 테스트케이스 비동기 생성 실행기
+# - 주요 기능:
+#   - 소주제별 요구사항 그룹화, LLM 시나리오 생성 호출 및 스키마 검증 수행
+#   - 코드 판정 기반 예측 정보 부여, 작업 취소·진행 상태·토큰 사용량 기록
+
 """고정된 명세에서 시험 초안을 생성하고 기존 판정으로 코드 예측만 붙인다."""
 
 from collections import defaultdict
@@ -10,9 +17,9 @@ from jsonschema import Draft202012Validator
 
 from adapters.v2_testgen import build_test_generation
 from api.errors import APIError
-from api.v2.extraction_runner import WORK_LOCK, analysis_client, transition_job
-from api.v2.server_llm import fail
-from api.v2.storage import project, public, resource
+from api.v2.common import WORK_LOCK, transition_job
+from api.v2.server_llm import analysis_client, fail
+from api.v2.storage import lock_project, project, public, resource
 from api.v2.test_generation_adapter import ingest_test_generation
 from api.v2.verification_runner import add_usage
 from testgen.generate import PROMPT_VERSION as GENERATOR_VERSION, SpecRequirement, generate, input_hash
@@ -120,6 +127,7 @@ class GenerationClient:
             )
         if self.api_key and self.api_key in json.dumps(response.data):
             raise APIError(502, "LLM_INVALID_RESPONSE", "정상 모델 응답을 확인하지 못했습니다")
+        # 연결된 조건과 미포함 조건 집합이 겹치거나 중복 보고되는 모순을 차단한다.
         explained = [u["condition_key"] for u in response.data["uncovered"]]
         covered = {
             key for s in response.data["scenarios"] for st in s["steps"] for key in st["condition_keys"]
@@ -136,6 +144,7 @@ class GenerationClient:
                     if not st['condition_keys']:
                         continue  # 조건 없는 단계는 기존 검증에서 제외하고 경고한다.
                     ids = st['design']['intent_ids']
+                    # 각 단계가 선택한 설계 관점의 원문 조건 집합은 해당 단계의 condition_keys와 정확히 같아야 한다.
                     if not ids or {intents[i]['condition_key'] for i in ids} != set(st['condition_keys']):
                         raise APIError(422, 'MODEL_OUTPUT_INVALID', '시험 관점과 단계의 원문 조건 연결이 일치하지 않습니다')
                     covered_intents.update(ids)
@@ -155,6 +164,7 @@ def generate_draft(run, groups, client, api_key, model, progress, check_cancelle
         'design_gaps': [],
     }
     usage, hashes, uncovered = {}, {}, []
+    # 소주제별로 독립 프롬프트를 구성하고 입력 지문 해시를 기록해 추후 재현성 검증에 사용한다.
     for done, (sub_id, requirements) in enumerate(groups.items(), 1):
         if check_cancelled:
             check_cancelled()
@@ -216,13 +226,13 @@ def generate_draft(run, groups, client, api_key, model, progress, check_cancelle
 
 def run_generation(database, p, spec_id, config):
     client = None
+    # 전역 WORK_LOCK 아래에서 사양서 생성 중 모델 설정 변경이나 수동 편집이 겹치지 않았는지 커밋 직전 재확인한다.
     with WORK_LOCK:
         with database.session() as db:
             spec = resource(db, p, spec_id, "test_specification")
             job_id = spec.data["job_id"]
         try:
             with database.session() as db:
-                from api.v2.testing import lock_project
                 lock_project(db, p)
                 job = resource(db, p, job_id, "job")
                 if job.data["status"] != "queued":
@@ -251,7 +261,6 @@ def run_generation(database, p, spec_id, config):
 
             def check_cancelled():
                 with database.session() as db:
-                    from api.v2.testing import lock_project
                     lock_project(db, p)
                     job = resource(db, p, job_id, "job")
                     if job.data.get("status") == "cancelled":
@@ -263,7 +272,6 @@ def run_generation(database, p, spec_id, config):
 
             def progress(done, total, used):
                 with database.session() as db:
-                    from api.v2.testing import lock_project
                     lock_project(db, p)
                     job = resource(db, p, job_id, "job")
                     if job.data.get("status") == "cancelled":
@@ -284,8 +292,6 @@ def run_generation(database, p, spec_id, config):
                 run, groups, client, config.llm_api_key, config.llm_model, progress, check_cancelled=check_cancelled
             )
             with database.session() as db:
-                from api.v2.testing import lock_project
-
                 lock_project(db, p)
                 job = resource(db, p, job_id, "job")
                 if job.data.get("status") == "cancelled":
@@ -354,7 +360,6 @@ def run_generation(database, p, spec_id, config):
 
 def mark_failed(database, p, spec_id, job_id, failure, usage=None):
     with database.session() as db:
-        from api.v2.testing import lock_project
         lock_project(db, p)
         job = resource(db, p, job_id, "job")
         if job.data.get("status") == "cancelled":

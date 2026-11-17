@@ -1,3 +1,10 @@
+# - 담당 파트: 테스트 사양서
+# - 작성자: 이성규
+# - 페이지 개요: 소주제 단위 요구사항·수락 조건 기반 테스트 시나리오 LLM 생성 모듈
+# - 주요 기능:
+#   - 조건 키 enum 및 설계 관점 스키마 동적 구성과 XML 태그 프롬프트 렌더링
+#   - 모델 응답 시나리오의 조건 연결 검증 및 미포함 조건 경고 생성
+
 """화면(소주제) 하나의 요구사항·조건으로 단계별 시험 시나리오를 만든다 (LLM 호출).
 
 예상결과는 기획서에서만 도출한다. 코드와 판정은 보내지 않는다 — 코드에 맞춰 예상결과를 바꾸면
@@ -54,6 +61,7 @@ INSTRUCTIONS = """\
 
 
 def build_schema(condition_keys: list[str], design_items: list[dict] | None = None) -> dict:
+    # 모델이 없는 조건 키를 생성하지 못하도록 허용 키 목록을 enum으로 강제
     key = {"type": "string", "enum": condition_keys}
     warning = {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}},
                "required": ["code", "message"], "additionalProperties": False}
@@ -93,6 +101,7 @@ def build_schema(condition_keys: list[str], design_items: list[dict] | None = No
         "additionalProperties": False,
     }
     if design_items is not None:
+        # 설계 관점 목록이 주어지면 출력 스키마의 각 단계에 허용 intent_ids를 제한해 연결
         intent = {"type": "string", "enum": [item['id'] for item in design_items]}
         step['properties']['design'] = {
             'type': 'object', 'additionalProperties': False,
@@ -149,6 +158,7 @@ def input_hash(model: str, subtopic_title: str, requirements: list[SpecRequireme
 
 def validate(result: dict, condition_keys: list[str]) -> tuple[list[dict], list[dict]]:
     """LLM 출력을 다시 검사한다. 반환: (시나리오 목록, 경고 목록). 단계 없는 시나리오는 버린다."""
+    # 모델 출력의 조건 키를 실제 허용 집합과 대조해 유효 시나리오와 경고를 분리
     known = set(condition_keys)
     warnings = []
     scenarios = []
@@ -176,6 +186,7 @@ def validate(result: dict, condition_keys: list[str]) -> tuple[list[dict], list[
 def generate(client: LLMClient, subtopic_title: str, requirements: list[SpecRequirement],
              design_items: list[dict] | None = None) -> dict:
     """반환: {scenarios, warnings, usage, model}. 실패하면 RuntimeError."""
+    # 요구조건의 조건 키를 수집해 기본 프롬프트를 만들고 설계 관점이 있으면 지시문과 스키마 확장
     keys = [c["stable_key"] for r in requirements for c in r.conditions]
     instructions, prompt = INSTRUCTIONS, render(subtopic_title, requirements)
     if design_items is not None:

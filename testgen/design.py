@@ -1,3 +1,10 @@
+# - 담당 파트: 테스트 사양서
+# - 작성자: 이성규
+# - 페이지 개요: 조건별 보수적 시험 관점 계획 수립 및 설계 연결 상태 집계 모듈
+# - 주요 기능:
+#   - 수락 조건 분류·수치·권한·상태 표현 기반 권장 시험 관점 규칙 추출
+#   - 단계별 관점 선택 정합성 검증 및 사양서 대비 작성·미포함 관점 집계
+
 """고정 조건에서 보수적인 시험 관점을 제안하고 실제 저장된 단계 연결을 집계한다.
 
 계획은 규칙 기반 제안이며, 시험의 충분성이나 수행 성공을 증명하지 않는다.
@@ -26,6 +33,7 @@ _NUMERIC = re.compile(r'\d+\s*(?:자|글자|문자|바이트|bytes?(?![A-Za-z])|
 
 
 def perspectives(condition):
+    # 코드 정적 검증이 불가능한 조건은 추측 관점을 붙이지 않고 실행 화면 직접 확인만 제안한다.
     if condition.get('verifiable') == 'not_statically_verifiable':
         return ['runtime_check']
     category, text = condition.get('category'), condition['text']
@@ -33,6 +41,7 @@ def perspectives(condition):
                'navigation': ['transition'], 'business_logic': ['business_rule'],
                'data': ['persistence'], 'error_message': ['error_feedback']}
     selected = list(primary.get(category, ['normal']))
+    # 수치 제약, 권한·역할, 상태 변화, 빈 목록 키워드가 감지되면 보완 관점을 중복 없이 추가한다.
     if condition.get('constraint') or (_NUMERIC.search(text) and re.search(r'이하|이상|미만|초과|최대|최소|까지|제한|범위|길이|용량', text)):
         selected.append('boundary')
     if re.search(r'권한|관리자|역할|비로그인|미로그인|접근', text):
@@ -67,6 +76,7 @@ def validate_design(step, plan):
     design = step.get('design')
     if not design:
         return
+    # 설계 의도 ID 중복·미등록 여부와 요구조건 링크 집합과의 정확한 일치를 검증
     intents = {item['id']: item for item in (plan or {}).get('items', [])}
     ids = design['intent_ids']
     if not ids or len(ids) != len(set(ids)) or not set(ids) <= intents.keys():
@@ -88,6 +98,7 @@ def design_review(spec, cases):
                                'requirement_title': req['title'], 'condition_id': c['id'], 'condition_text': c['text']})
     known = {(c['requirement_id'], c['requirement_revision'], c['condition_id']) for c in conditions}
     for case in cases:
+        # 생성 당시 개정과 현재 케이스 개정이 다르면 절차가 수정된 구버전 설계로 간주
         metadata = case.get('design') or {}
         stale = bool(metadata) and metadata.get('generated_revision') != case['revision']
         for step in case['steps']:
@@ -110,6 +121,7 @@ def design_review(spec, cases):
     gaps = {gap['intent_id']: gap['reason'] for gap in spec.get('design_gaps', [])}
     for item in (plan or {}).get('items', []):
         refs = intent_refs[item['id']]
+        # 최신 개정 명세 근거 연결이 있으면 written, 구버전·수기 연결만 있으면 review_needed, 미연결이면 missing 판정
         status = ('written' if any(not r['stale'] and r['basis'] == 'specification' for r in refs)
                   else 'review_needed' if refs else 'missing')
         items.append({**item, 'status': status, 'test_refs': refs,

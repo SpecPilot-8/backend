@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: v2 프로젝트·모델 설정 관리 및 비동기 작업 상태·SSE API 라우터
+# - 주요 기능:
+#   - 프로젝트 생성·조회·수정·연관 파일 포함 삭제 및 지원 기능 목록 제공
+#   - 서버 LLM 연결 상태 진단, 모델 설정 조회 및 작업 취소·실시간 이벤트 스트리밍
+
 import json
 import logging
 from pathlib import Path
@@ -7,11 +14,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import Field, SecretStr
 from sqlalchemy import delete, select, update
 from api.errors import APIError
-from api.models import new_id, now
-from api.v2.common import Config, DB, Input, Limit, Offset, job_out, missing
-from api.v2.storage import ProjectRecord, Resource, Revision, SavedRequest, all_resources, page, project, resource, create, replace
+from api.v2.common import Config, DB, Input, Limit, Offset, job_out, missing, new_id, now, transition_job, workspace_path
+from api.v2.storage import ProjectRecord, Resource, Revision, SavedRequest, all_resources, create, lock_project, page, project, replace, resource
 from api.v2.server_llm import server_profile, settings_fingerprint, probe_connection, connection_state
-from services.workspace import workspace_path
 
 router = APIRouter(prefix='/api/v2', tags=['v2 프로젝트·모델·작업'])
 logger = logging.getLogger(__name__)
@@ -87,6 +92,7 @@ def edit_project(p: str, body: ProjectEdit, db: DB):
     changes = {'name': body.name, 'version': body.base_version + 1}
     if body.tech_stack is not None:
         changes['tech_stack'] = body.tech_stack
+    # 기준 버전이 일치할 때만 갱신해 동시 수정 요청이 이전 변경을 덮어쓰지 않도록 막는다.
     result = db.execute(update(ProjectRecord).where(ProjectRecord.id == p, ProjectRecord.version == body.base_version)
                         .values(**changes), execution_options={'synchronize_session': False})
     db.refresh(value)
@@ -111,7 +117,6 @@ def delete_project_files(paths, config):
 
 @router.delete('/projects/{p}', status_code=204)
 def delete_project(p: str, db: DB, config: Config):
-    from api.v2.testing import lock_project
     lock_project(db, p)  # 존재하지 않으면 404, 동시 요청과 직렬화
     resources = list(db.scalars(select(Resource).where(Resource.project_id == p)))
     if any(x.kind == 'job' and x.data.get('status') in ('queued', 'running') for x in resources):
@@ -119,6 +124,7 @@ def delete_project(p: str, db: DB, config: Config):
     files = [x.data['storage_path'] for x in resources if x.kind in ('document', 'artifact') and x.data.get('storage_path')]
     ids = select(Resource.id).where(Resource.project_id == p)
     opts = {'synchronize_session': False}
+    # 외래키 제약 순서에 맞춰 개정 이력, 리소스, 멱등 요청, 프로젝트 레코드 순으로 지우고 커밋 후 파일을 정리한다.
     db.execute(delete(Revision).where(Revision.resource_id.in_(ids)), execution_options=opts)
     db.execute(delete(Resource).where(Resource.project_id == p), execution_options=opts)
     db.execute(delete(SavedRequest).where(SavedRequest.project_id == p), execution_options=opts)
@@ -203,16 +209,14 @@ def job(p: str, j: str, db: DB):
 
 @router.post('/projects/{p}/jobs/{j}/cancel')
 def cancel_job(p: str, j: str, db: DB):
-    from api.v2.testing import lock_project
     lock_project(db, p)
     item = resource(db, p, j, 'job')
     if item.data['status'] not in ('queued', 'running'):
         raise APIError(409, 'JOB_NOT_RUNNING', f"이미 종료된 작업은 중단할 수 없습니다 (현재 상태: {item.data['status']})")
-
-    from api.v2.extraction_runner import transition_job
     error_payload = {'code': 'JOB_CANCELLED', 'message': '사용자에 의해 작업이 중단되었습니다'}
     transition_job(db, item, 'cancelled', error=error_payload, missing_features=[])
 
+    # 작업과 연결된 검증 실행이나 테스트 사양서 초안 상태도 함께 중단 처리해 화면 상태 불일치를 막는다.
     ref = item.data.get('result_ref')
     if ref and ref.get('id'):
         if ref.get('kind') == 'verification_run':

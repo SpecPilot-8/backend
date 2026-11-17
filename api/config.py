@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: API 서버 실행 환경변수 및 제한 정책 설정 모듈
+# - 주요 기능:
+#   - 데이터 저장소, 워크스페이스 루트, DB URL 및 CORS 허용 출처 로드
+#   - 파일 업로드·소스 청킹·엑셀 출력 상한 및 LLM 제공자 설정 관리
+
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +22,7 @@ class Settings:
     max_export_rows: int = 10000
     llm_provider: str = 'anthropic'
     llm_model: str = 'claude-opus-5'
+    # 객체 문자열 출력이나 디버그 로그에 API 키가 노출되지 않도록 repr 대상에서 제외한다.
     llm_api_key: str = field(default='', repr=False)
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
 
@@ -22,6 +30,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         repo = Path(__file__).resolve().parent.parent
         data = Path(os.getenv("SPECPILOT_DATA_DIR", str(repo / ".data"))).resolve()
+        # 선택한 LLM 제공자에 따라 인증 키 환경변수를 분기해 로드한다.
         return cls(
             data_dir=data,
             workspace_root=Path(os.getenv("SPECPILOT_WORKSPACE_ROOT", str(repo.parent))).resolve(),

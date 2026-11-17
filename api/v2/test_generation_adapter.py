@@ -1,11 +1,18 @@
+# - 담당 파트: 백엔드 API / 테스트 사양서
+# - 작성자: 이성규
+# - 페이지 개요: AI 생성 테스트케이스 후보의 계약 검증 및 v2 저장소 적재 어댑터
+# - 주요 기능:
+#   - test-generation.schema.json 기반 AI 생성 결과·예측 근거 청크 검증
+#   - 기존 수동 편집·수행 기록을 덮어쓰지 않고 신규 시험 후보만 사양서에 추가
+
 """Validate generated candidates; never accepts actual execution fields."""
 import json
 from pathlib import Path
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 from api.errors import APIError
-from api.v2.storage import resource
-from api.v2.testing import CaseCreate, create_case, lock_project, update_spec, validate_case
+from api.v2.storage import lock_project, resource
+from api.v2.testing import CaseCreate, create_case, update_spec, validate_case
 
 _SCHEMA = json.loads((Path(__file__).resolve().parents[2] / 'docs/schemas/test-generation.schema.json').read_text())
 _VALIDATOR = Draft202012Validator(_SCHEMA)
@@ -22,6 +29,7 @@ def ingest_test_generation(db, p, t, output):
     candidates = output['test_candidates']
     if not candidates or len({c['candidate_key'] for c in candidates}) != len(candidates):
         raise APIError(422, 'MODEL_OUTPUT_INVALID', '빈 후보 또는 중복 후보 키입니다')
+    # 영속화 전에 모든 후보의 예측 근거 청크가 연결 요구사항의 이 화면 근거이며 동일 스냅샷 소속인지 선검증한다.
     planned = []
     try:
         for c in candidates:
@@ -41,6 +49,7 @@ def ingest_test_generation(db, p, t, output):
             if any(bool(c.get('design')) != bool(s.get('design')) for s in payload['steps']):
                 raise ValueError
             planned.append((payload, c['prediction'], c['assumptions'], c['warnings'], c.get('design')))
+        # 설계 계획에 포함된 관점이 단계에서 다뤄졌으면서 동시에 누락 관점으로도 보고되는 모순을 차단한다.
         known = {i['id'] for i in spec.data.get('design_plan', {}).get('items', [])}
         gap_ids = [g['intent_id'] for g in output.get('design_gaps', [])]
         covered = {i for c in candidates for s in c['steps'] for i in (s.get('design') or {}).get('intent_ids', [])}
@@ -56,6 +65,6 @@ def ingest_test_generation(db, p, t, output):
         case = create_case(db, p, spec, data, 'generated', prediction)
         versions[case.id] = 1
         ids.append(case.id)
-    # A new generation appends candidates and never overwrites manual edits/executions.
+    # AI가 새로 생성한 시험 후보는 기존 사양서 끝에 추가할 뿐 수동 편집 절차나 실제 수행 기록을 덮어쓰지 않는다.
     update_spec(db, spec, versions, '모델 시험 후보 추가')
     return ids

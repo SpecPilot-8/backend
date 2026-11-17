@@ -1,10 +1,16 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: v2 코드 검증 판정 결과의 스키마 검증 및 스냅샷 근거 적재 어댑터
+# - 주요 기능:
+#   - verdict.schema.json 검증 및 실제 스냅샷 청크 ID·화면 도달 범위 대조
+#   - 조건별 판정 집계, 호출 그래프·코드 근거 저장 및 검증 실행 상태 갱신
+
 """Internal teammate-2 boundary. Scopes/graph must come from the code parser, not an LLM."""
 from copy import deepcopy
 from typing import Literal
 from pydantic import Field, ValidationError
 from api.errors import APIError
-from api.models import new_id
-from api.v2.common import Input
+from api.v2.common import Input, new_id, transition_job
 from api.v2.storage import all_resources, replace, resource
 from verdict.rules import aggregate
 
@@ -62,6 +68,7 @@ def ingest_verdict(db, p, v, output, trusted_scopes, trusted_graph=None):
                 details['condition_id'] = condition_id
             raise APIError(422, 'MODEL_OUTPUT_INVALID', '조건·청크·화면 범위·노드 관계가 유효하지 않습니다',
                            details=details)
+    # 정적 파서가 계산한 trusted_scopes와 호출 그래프 노드·간선이 현재 스냅샷 청크와 모순 없는지 검증한다.
     check(req is not None and draft.snapshot_id == run.data['snapshot_id'], 'snapshot_requirement_match')
     check(draft.requirement_revision == req['revision'], 'requirement_revision')
     check(draft.requirement_id not in run.data['results'], 'duplicate_result')
@@ -74,6 +81,7 @@ def ingest_verdict(db, p, v, output, trusted_scopes, trusted_graph=None):
     check(len(node_ids) == len(graph['nodes']), 'graph_node_unique')
     check(all(n.get('chunk_id') in chunks for n in graph['nodes']), 'graph_chunk_snapshot')
     check(all(e['from'] in node_ids and e['to'] in node_ids for e in graph['edges']), 'graph_edge_nodes')
+    # 조건별 근거 청크는 반드시 이 화면 또는 타 화면으로 분류된 신뢰 스코프에 속해야 하며, 청크 단위로 병합해 고유 ID를 부여한다.
     evidence, evidence_ids = {}, {}
     for c in draft.condition_verdicts:
         check(len(c.primary_chunk_ids) == len(set(c.primary_chunk_ids)), 'primary_chunk_unique', c.condition_id)
@@ -103,6 +111,7 @@ def ingest_verdict(db, p, v, output, trusted_scopes, trusted_graph=None):
             ev['explanation'] += c.reason + '\n'
     statuses = [c.status for c in draft.condition_verdicts]
     findings = []
+    # 문제 지적 사항과 그래프 노드에도 병합된 evidence_ids를 연결하고 모든 요구사항이 끝나면 실행·Job 상태를 완료로 전이한다.
     check(len({f.key for f in draft.findings}) == len(draft.findings), 'finding_key_unique')
     for f in draft.findings:
         check(set(f.condition_ids) <= conditions.keys() and set(f.problem_node_ids) <= node_ids,
@@ -130,7 +139,6 @@ def ingest_verdict(db, p, v, output, trusted_scopes, trusted_graph=None):
     status = 'completed' if len(results) == len(run.data['requirements']) else 'running'
     replace(db, run, {**run.data, 'results': results, 'status': status, 'missing_features': []})
     if status == 'completed':
-        from api.v2.extraction_runner import transition_job
         job = resource(db, p, run.data['job_id'], 'job')
         transition_job(db, job, 'completed',
                        progress={'stage': 'condition_judgment', 'completed': len(results), 'total': len(run.data['requirements'])},

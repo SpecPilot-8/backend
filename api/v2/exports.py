@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 API / 테스트 사양서
+# - 작성자: 이성규
+# - 페이지 개요: v2 검증 추적표 및 테스트 사양서 엑셀 내보내기·다운로드 API
+# - 주요 기능:
+#   - 요구사항-코드 검증 추적표 엑셀 시트 생성 및 아티팩트 저장
+#   - 단계별 테스트 사양서·설계 검토·최신 수행 결과를 지정 양식 엑셀 파일로 출력 및 다운로드
+
 from copy import deepcopy
 from datetime import datetime
 from hashlib import sha256
@@ -16,10 +23,9 @@ from openpyxl.utils import get_column_letter
 from pydantic import Field
 
 from api.errors import APIError
-from api.models import new_id
-from api.v2.common import Config, DB, Input, make_job
-from api.v2.storage import create, historical, project, resource
-from api.v2.testing import EXPORT_SECTIONS, current_cases, latest_execution, lock_project
+from api.v2.common import Config, DB, Input, make_job, new_id
+from api.v2.storage import create, historical, lock_project, project, resource
+from api.v2.testing import EXPORT_SECTIONS, current_cases, latest_execution
 from api.v2.verification import selected_rows
 
 router = APIRouter(prefix='/api/v2/projects/{p}', tags=['v2 Excel 출력·다운로드'])
@@ -49,7 +55,8 @@ def value(cell, content, warnings):
             content = content[:32720] + '\n[Excel 셀 한도로 일부 표시됨]'
             warnings.append({'code': 'EXCEL_TEXT_TRUNCATED', 'message': '셀 한도 초과: API의 원문/청크 조회에서 전체 내용을 확인하세요', 'cell': f'{cell.parent.title}!{cell.coordinate}'})
         cell.value = content
-        cell.data_type = 's'  # Literal text including =, +, -, @ must never become formulas.
+        # =, +, -, @ 로 시작하는 문자열이 엑셀 수식으로 해석·실행되지 않도록 항상 일반 텍스트 셀로 고정한다.
+        cell.data_type = 's'
     else:
         cell.value = content
     if isinstance(content, datetime):
@@ -109,6 +116,7 @@ def artifact(db, p, config, workbook, filename, selection, warnings):
     directory = config.data_dir / 'artifacts'
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f'{identity}.xlsx'
+    # DB 레코드 저장이나 Job 등록 중 오류가 나면 디스크에 생성한 임시 엑셀 파일을 즉시 롤백 삭제한다.
     target.write_bytes(content)
     try:
         saved = create(db, p, 'artifact', {'filename': filename, 'storage_path': str(target), 'content_type': XLSX,
@@ -233,7 +241,7 @@ def test_export(p: str, body: TestExport, db: DB, config: Config):
                 confirmation = {'passed': 'O', 'failed': 'X', 'on_hold': '보류'}.get(actual.get('status'))
                 row(sheet, row_number, [case['test_no'], topic, subtopic, step['order'], step['action'], step['expected'],
                     step['test_data']['account'] or '-', step['test_data']['input'], step['test_data']['notes'], confirmation], warnings)
-                # Size by visible text/column width; no arbitrary small height for long steps.
+                # 셀 너비 대비 실제 줄 수를 추정해 긴 테스트 절차 텍스트가 잘리지 않도록 행 높이를 동적 계산한다.
                 widths = {5:52,6:52,8:36,9:36}
                 line_count = max(2, *(sum(max(1, math.ceil(len(line)*1.8/width)) for line in str(sheet.cell(row_number, col).value or '').split('\n')) for col, width in widths.items()))
                 sheet.row_dimensions[row_number].height = min(409, line_count * 15 + 10)
@@ -248,9 +256,10 @@ def test_export(p: str, body: TestExport, db: DB, config: Config):
             index.cell(no, 1).hyperlink = f"#'{name}'!A1"
     style_grid(index, 2, index.max_row, 8)
     index.freeze_panes = 'D5'
+    # 상세 분석 옵션이 켜진 경우 요구사항-시험 대응, 설계 관점 점검, 원문·근거·수행 이력 대조 시트를 추가로 생성한다.
     if body.include_analysis_detail:
         from testgen.design import design_review
-        from api.v2.test_design_reviews import review_for_case
+        from api.v2.testing import review_for_case
         human_reviews = {case['id']: review_for_case(db, p, case) for case in cases}
         comparison = []
         steps_by_condition = {}

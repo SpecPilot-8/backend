@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: v2 요구사항 추출 결과 데이터의 스키마·원문 출처 계약 검증 모듈
+# - 주요 기능:
+#   - requirement-extraction.schema.json 기반 AI 추출 초안 검증
+#   - 원문 블록 ID·인용구 일치 여부 확인 후 영속화 전 유효성 보장
+
 """Validate teammate-1 output before allocating any persistent identifiers."""
 from copy import deepcopy
 import json
@@ -14,6 +21,7 @@ def validate_extraction(draft, artifact):
         if not test:
             raise ValueError
     try:
+        # 1단계: JSON 스키마 구조와 현재 문서 버전·블록 목록 일치 여부를 먼저 확인한다.
         require(not list(_VALIDATOR.iter_errors(draft)))
         require((draft['document_id'], draft['document_revision']) == (artifact['document_id'], artifact['document_revision']))
         blocks = {b['id']: b for b in artifact['blocks']}
@@ -22,6 +30,7 @@ def validate_extraction(draft, artifact):
         require(len(screens) == len(draft['screens']))
         topic_keys = [t['key'] for t in draft['topics']]
         require(len(topic_keys) == len(set(topic_keys)))
+        # 2단계: 주제·소주제 계층과 각 소주제가 참조하는 화면 키가 실존하는지 점검한다.
         subs = {}
         for t in draft['topics']:
             require(t['subtopics'])
@@ -37,6 +46,7 @@ def validate_extraction(draft, artifact):
         rkeys = [r['stable_key'] for r in draft['requirements']]
         ckeys = [c['stable_key'] for r in draft['requirements'] for c in r['conditions']]
         require(len(rkeys) == len(set(rkeys)) and len(ckeys) == len(set(ckeys)))
+        # 3단계: 요구사항별 출처 마커·관련 조건 키 유효성과 빈 소주제 없음을 확인한다.
         used = set()
         for r in draft['requirements']:
             t, sub = subs[r['subtopic_key']]
@@ -52,6 +62,7 @@ def validate_extraction(draft, artifact):
             for c in r['conditions']:
                 require(set(c['related_condition_keys']) <= set(ckeys) and c['stable_key'] not in c['related_condition_keys'])
         require(used == set(subs))
+        # 4단계: 화면 상속 구조가 자기 자신이나 순환 참조로 빠지지 않는지 확인한다.
         for s in screens.values():
             seen = {s['screen_key']}
             parent = s['base_screen_key']
@@ -59,6 +70,7 @@ def validate_extraction(draft, artifact):
                 require(parent in screens and parent not in seen)
                 seen.add(parent)
                 parent = screens[parent]['base_screen_key']
+        # 5단계: 초안 전체의 source_refs 인용구가 실제 문서 블록 텍스트의 부분 문자열인지 재귀 검증한다.
         def walk(x):
             if isinstance(x, dict):
                 for ref in x.get('source_refs', []):

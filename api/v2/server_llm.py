@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: 서버 환경변수 기반 단일 LLM 프로필·클라이언트 팩토리 및 연결 점검 모듈
+# - 주요 기능:
+#   - Anthropic·Vercel Gateway 공용 LLM 클라이언트 생성 및 상태 판별
+#   - 최소 JSON 응답 호출을 통한 모델 연결 유효성·에러 진단
+
 """서버 환경변수로 고정한 단일 모델의 짧은 실제 연결 검사."""
 from hashlib import sha256
 import json
@@ -7,7 +14,7 @@ import anthropic
 from jsonschema import Draft202012Validator
 
 from api.errors import APIError
-from api.models import now
+from api.v2.common import now
 from api.v2.storage import all_resources
 
 SCHEMA = {'type': 'object', 'properties': {'ok': {'type': 'boolean'}},
@@ -27,6 +34,7 @@ ERRORS = {
 def server_profile(config):
     supported = config.llm_provider in ('anthropic', 'vercel')
     model_valid = bool(re.fullmatch(r'[A-Za-z0-9._:/-]{1,200}', config.llm_model))
+    # Vercel Gateway는 provider/model 형식 식별자가 필수다.
     if config.llm_provider == 'vercel':
         model_valid = model_valid and '/' in config.llm_model
     key_valid = bool(config.llm_api_key and config.llm_api_key.isascii()
@@ -40,6 +48,7 @@ def server_profile(config):
 
 
 def settings_fingerprint(config):
+    # 서버 재시작 후 제공자·모델·API 키가 바뀌면 기존 연결 확인 결과를 자동 무효화하기 위한 지문이다.
     return sha256(json.dumps([config.llm_provider, config.llm_model, config.llm_api_key]).encode()).hexdigest()
 
 
@@ -49,13 +58,24 @@ def connection_state(db, p, version, config):
     return 'connected' if server_profile(config)['enabled'] and matches and matches[-1].data['status'] == 'connected' else 'not_connected'
 
 
-def probe_client(config):
+def _build_llm_client(config, *, effort: str, max_tokens: int, timeout_seconds: int):
+    # 연결 점검과 실제 분석 작업이 동일 제공자 분기 및 타임아웃 규격을 공유하도록 통합 생성한다.
     if config.llm_provider == 'anthropic':
         from llm.anthropic_client import AnthropicClient
-        return AnthropicClient(model=config.llm_model, effort='low', api_key=config.llm_api_key,
-                               max_tokens=256, timeout_seconds=20, max_retries=0, base_url="https://api.anthropic.com")
+        return AnthropicClient(model=config.llm_model, effort=effort, api_key=config.llm_api_key,
+                               max_tokens=max_tokens, timeout_seconds=timeout_seconds,
+                               max_retries=0, base_url='https://api.anthropic.com')
     from llm.vercel_client import VercelClient
-    return VercelClient(api_key=config.llm_api_key, model=config.llm_model, max_tokens=256, timeout_seconds=20)
+    return VercelClient(api_key=config.llm_api_key, model=config.llm_model,
+                        max_tokens=max_tokens, timeout_seconds=timeout_seconds)
+
+
+def probe_client(config):
+    return _build_llm_client(config, effort='low', max_tokens=256, timeout_seconds=20)
+
+
+def analysis_client(config):
+    return _build_llm_client(config, effort='high', max_tokens=16000, timeout_seconds=120)
 
 
 def fail(error):

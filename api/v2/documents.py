@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: v2 기획서 업로드·파싱·AI 요구사항 추출 및 검토 확정 관리 API
+# - 주요 기능:
+#   - PDF 문서 업로드, 결정론적 레이아웃 파싱 및 블록·아웃라인 조회 제공
+#   - AI 요구사항·수락 조건 비동기 추출 실행, 수동 편집·개정 및 일괄 검토 확정 처리
+
 from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
@@ -10,11 +17,10 @@ from pydantic import Field, model_validator
 from sqlalchemy import select
 
 from api.errors import APIError
-from api.models import new_id
-from api.v2.common import Config, DB, Input, Limit, Offset, RevisionQuery, make_job, missing, job_out
+from api.v2.common import Config, DB, Input, Limit, Offset, QUEUE_LOCK, RevisionQuery, job_out, make_job, missing, new_id
 from api.v2.document_contracts import validate_extraction
 from api.v2.pdf_parser import parse_source
-from api.v2.storage import Revision, all_resources, create, page, project, public, replace, resource
+from api.v2.storage import Revision, all_resources, create, lock_project, page, project, public, replace, resource
 
 router = APIRouter(prefix='/api/v2/projects/{p}', tags=['v2 문서·요구사항'])
 
@@ -160,7 +166,7 @@ def condition_payloads(db, p, data, old=None):
         c = deepcopy(c)
         if c.get('id') is not None and c['id'] not in old_conditions:
             raise APIError(422, 'VALIDATION_ERROR', '기존 조건 ID를 확인하세요')
-        c['id'] = new_id()  # Each requirement revision owns new condition IDs.
+        c['id'] = new_id()  # 각 요구사항 개정마다 새 조건 ID를 발급한다.
         refs_valid(c['source_refs'], blocks.data['blocks'])
         result.append(c)
     id_mapping = {x['id']: y['id'] for x, y in zip(data['conditions'], result) if x.get('id')}
@@ -168,7 +174,7 @@ def condition_payloads(db, p, data, old=None):
                             if r.data['document_id'] == data['document_id'] and r.data['document_revision'] == data['document_revision']
                             and (not old or r.id != old.get('id'))]
     allowed = set(id_mapping) | {c['id'] for r in related_requirements for c in r.data['conditions']}
-    # Condition IDs belong to immutable revisions, including other requirements' history.
+    # 조건 ID는 불변 리비전 단위로 새로 발급되므로 과거 개정 이력에 있던 조건 ID까지 합쳐 관련 조건 참조를 허용한다.
     for revision in db.scalars(select(Revision).where(Revision.resource_id.in_([r.id for r in related_requirements]))):
         if (revision.data.get('document_id'), revision.data.get('document_revision')) == (data['document_id'], data['document_revision']):
             allowed.update(c['id'] for c in revision.data['conditions'])
@@ -201,6 +207,7 @@ async def upload_document(p: str, db: DB, config: Config, file: Annotated[Upload
     content = await file.read(config.max_upload_bytes + 1)
     if len(content) > config.max_upload_bytes:
         raise APIError(413, 'FILE_TOO_LARGE', '문서 업로드 한도를 초과했습니다')
+    # 확장자만 바꾼 위장 파일이나 암호화·빈 PDF, 500쪽 초과 문서를 열기 전에 차단한다.
     try:
         with pymupdf.open(stream=content, filetype='pdf') as pdf:
             if pdf.needs_pass or not content.startswith(b'%PDF-') or len(pdf) > 500 or not len(pdf):
@@ -229,7 +236,7 @@ def document(p: str, d: str, db: DB):
 
 @router.get('/documents/{d}/file')
 def document_file(p: str, d: str, db: DB):
-    # 화면에서 판정 옆에 원본 페이지를 띄우는 용도. 블록 location(page, bbox)과 같은 좌표계(PDF pt)다.
+    # 화면 판정 뷰 옆에 원본 페이지를 띄울 때 사용하며 블록 위치와 같은 PDF 포인트 좌표계를 유지한다.
     item = resource(db, p, d, 'document')
     path = Path(item.data.get('storage_path') or '')
     if not path.is_file():
@@ -242,7 +249,7 @@ def document_file(p: str, d: str, db: DB):
 def parse(p: str, d: str, body: ParseRequest, db: DB):
     item = resource(db, p, d, 'document')
     check_document_version(item, body.document_revision)
-    # Replaying parse never replaces source block IDs referenced by saved requirements.
+    # 이미 요구사항이 참조 중인 블록 ID가 바뀌지 않도록 추출 중이거나 사용 중인 문서는 재파싱을 막는다.
     if body.force and any(j.data.get('document_id') == d and j.data['status'] in ('queued', 'running') for j in all_resources(db, p, 'job')):
         raise APIError(409, 'EXTRACTION_IN_PROGRESS', '요구사항 추출 중에는 원문을 다시 파싱할 수 없습니다')
     if body.force and (item.data.get('requirement_ids') or any(r.data['document_id'] == d for r in all_resources(db, p, 'requirement'))):
@@ -297,12 +304,13 @@ def extract(p: str, d: str, body: ExtractRequest, db: DB, settings: Config, requ
         return make_job(db, p, 'extract_requirements', body.model_dump(), missing('requirement_extraction', '서버 모델 연결을 먼저 설정하세요'))
     if connection_state(db, p, config.config_version, settings) != 'connected':
         raise APIError(409, 'MODEL_NOT_CONNECTED', '프로젝트 설정에서 실제 모델 연결을 먼저 확인하세요')
-    from api.v2.extraction_runner import QUEUE_LOCK, PROMPT_VERSION, prepare_document, run_extraction
+    from api.v2.extraction_runner import PROMPT_VERSION, prepare_document, run_extraction
     if item.data.get('requirement_ids') or any(r.data['document_id'] == d for r in all_resources(db, p, 'requirement')):
         raise APIError(409, 'EXTRACTION_ALREADY_STORED', '요구사항이 이미 저장되어 있습니다. 기존 항목을 편집하거나 새 문서로 분석하세요')
     if item.data.get('parser_version') != 'pdf-layout-2':
         raise APIError(409, 'DOCUMENT_REPARSE_REQUIRED', '한국어 OCR 설정을 확인한 뒤 문서를 다시 파싱하세요')
     prepare_document(item.data)
+    # 동일 문서의 중복 추출 접수를 큐 락으로 직렬화하고 요청 시점 모델 설정 스냅샷을 작업에 고정한다.
     with QUEUE_LOCK:
         if any(j.data.get('document_id') == d and j.data['status'] in ('queued', 'running') for j in all_resources(db, p, 'job')):
             raise APIError(409, 'EXTRACTION_IN_PROGRESS', '이 문서의 추출이 진행 중입니다. 진행 상태를 확인하세요')
@@ -331,7 +339,6 @@ def groups(p: str, d: str, db: DB, document_revision: RevisionQuery = None):
 
 @router.post('/documents/{d}/requirement-groups', status_code=201)
 def manual_group(p: str, d: str, body: ManualGroup, db: DB):
-    from api.v2.testing import lock_project
     lock_project(db, p)
     document = resource(db, p, d, 'document')
     check_document_version(document, body.document_revision)
@@ -365,6 +372,7 @@ def requirements(p: str, db: DB, document_id: str | None = None, document_revisi
                  topic_id: str | None = None, subtopic_id: str | None = None, screen_id: str | None = None,
                  review_status: Literal['pending', 'needs_review', 'approved'] | None = None,
                  q: str | None = None, limit: Limit = 50, offset: Offset = 0):
+    # 문서·주제·소주제·화면 필터 조합이 서로 다른 문서나 계층을 가리킬 경우 조회 전 422 오류로 차단한다.
     filters = []
     if document_id:
         d = resource(db, p, document_id, 'document')
@@ -460,6 +468,7 @@ def ingest_extraction(db, p, d, draft):
     draft = validate_extraction(draft, artifact)
     if doc.data.get('topic_ids') or doc.data.get('requirement_ids'):
         raise APIError(409, 'EXTRACTION_ALREADY_STORED', '재추출 채택 정책을 먼저 적용해야 합니다')
+    # 검증된 초안의 논리 키를 실제 DB UUID로 일괄 치환한 뒤 주제·소주제·화면·요구사항 순으로 저장한다.
     topics, subs, screens, conditions = {}, {}, {}, {}
     for t in draft['topics']:
         topics[t['key']] = new_id()

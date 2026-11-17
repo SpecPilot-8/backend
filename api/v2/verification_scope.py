@@ -1,3 +1,10 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: 코드 검증을 위한 화면별 진입 파일 자동 추론 및 정적 범위 빌더 모듈
+# - 주요 기능:
+#   - Spring·React 기술 스택과 화면 키워드·라우팅 규칙 기반 진입 파일 후보 추론
+#   - 선택된 진입 파일 검증 및 ScopeBuilder를 통한 화면 도달 범위 산출
+
 """사용자가 확인한 진입 파일로만 정적 화면 범위를 만든다."""
 import json
 from pathlib import Path, PurePosixPath
@@ -76,6 +83,7 @@ def infer_suggested_files(group, entry_files, stack):
     if screen_id:
         title_terms.extend([t for t in screen_id.replace('-', ' ').replace('_', ' ').split() if len(t) >= 2])
 
+    # 한글 기능명을 영문 코드 파일명 키워드로 확장해 파일 경로 매칭 점수를 매긴다.
     expanded_terms = set(title_terms)
     for term in title_terms:
         for ko, en_list in KO_EN_MAP.items():
@@ -109,6 +117,7 @@ def infer_suggested_files(group, entry_files, stack):
     if scored:
         return [f for _, f in scored[:3]]
 
+    # 직접 키워드가 맞지 않으면 Spring 컨트롤러나 React 루트 라우터 파일을 기본 후보로 제안한다.
     fallback = []
     for file in entry_files:
         name_lower = PurePosixPath(file).stem.lower()
@@ -137,6 +146,7 @@ def scope_options(db, p, snapshot, requirements, hint='auto'):
         source = Path(__file__).resolve().parents[2] / 'matcher' / 'scope' / 'entries' / f'{stack}-sample.json'
         presets = json.loads(source.read_text())
     entry_files = [f for f in files if PurePosixPath(f).suffix.lower() in ('.java', '.js', '.jsx', '.html', '.htm', '.ts', '.tsx')]
+    # 동일 스냅샷에 저장된 확정 이력을 최우선으로 쓰고, 없으면 샘플 프리셋과 키워드 추론 순으로 진입 파일을 추천한다.
     for group in groups:
         entries = saved.get('entries', {}).get(group['key'], [])
         if not entries:
@@ -167,6 +177,7 @@ def make_builder(snapshot, raw_chunks, scope, root):
         raise APIError(413, 'VERIFICATION_LIMIT_EXCEEDED', '현재 검증 한도는 소스 50만 문자·5000청크입니다')
     prefix = wrapper_prefix(files)
     rows, ids, metadata = [], {}, {}
+    # 테스트 파일을 제외한 운영 코드 청크만 순서대로 번호를 매겨 정적 범위 분석기 입력으로 구성한다.
     for item in sorted(raw_chunks, key=lambda c: (c['file_path'], c['start_line'], c.get('start_byte', 0),
                                                   c['end_line'], c['id'])):
         if not production_file(item['file_path']):

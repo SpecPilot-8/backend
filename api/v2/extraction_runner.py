@@ -1,21 +1,24 @@
+# - 담당 파트: 백엔드 API
+# - 작성자: 이성규
+# - 페이지 개요: v2 기획서 기반 AI 요구사항·수락 조건 비동기 추출 실행기
+# - 주요 기능:
+#   - 문서 화면/표 블록 정리, LLM 클라이언트 호출 및 조건 카테고리 분류 수행
+#   - 원문 블록 매핑, 작업 진행 상태 갱신 및 취소/설정 변경 시 결과 차단 처리
+
 """웹 문서의 고정 원문 → 기존 조건 분해기 → 검증된 v2 초안. PostgreSQL 불필요."""
 from copy import deepcopy
-from threading import Lock
 
 import anthropic
 from jsonschema import Draft202012Validator
 
 from adapters.v2_extraction import build_artifact, build_extraction
 from api.errors import APIError
-from api.v2.common import job_out
+from api.v2.common import WORK_LOCK, transition_job
 from api.v2.document_contracts import validate_extraction
-from api.v2.server_llm import fail
-from api.v2.storage import project, replace, resource, all_resources
+from api.v2.server_llm import analysis_client, fail
+from api.v2.storage import all_resources, lock_project, project, resource
 from decomposer.decompose import decompose_screen
 from matcher.data import Requirement
-
-WORK_LOCK = Lock()  # 로컬 개발 서버에서 대규모 호출을 동시에 실행하지 않는다.
-QUEUE_LOCK = Lock()
 CATEGORIES = ['display', 'validation', 'navigation', 'business_logic', 'data', 'error_message']
 PROMPT_VERSION = 'decompose-v3-web-category-1'
 CATEGORY_INSTRUCTIONS = '''
@@ -33,6 +36,7 @@ class CategorizedClient:
 
     def complete_json(self, **kwargs):
         schema = deepcopy(kwargs['schema'])
+        # 기본 분해 스키마에 웹 분류 체계용 category 열거형과 최소 출처 요건을 동적으로 덧붙인다.
         condition = schema['properties']['requirements']['items']['properties']['conditions']['items']
         condition['properties']['category'] = {'type': 'string', 'enum': CATEGORIES}
         condition['required'].append('category')
@@ -57,16 +61,6 @@ class CategorizedClient:
         return result
 
 
-def analysis_client(config):
-    if config.llm_provider == 'anthropic':
-        from llm.anthropic_client import AnthropicClient
-        return AnthropicClient(config.llm_model, effort='high', api_key=config.llm_api_key,
-                               max_tokens=16000, timeout_seconds=120, max_retries=0,
-                               base_url='https://api.anthropic.com')
-    from llm.vercel_client import VercelClient
-    return VercelClient(api_key=config.llm_api_key, model=config.llm_model, max_tokens=16000, timeout_seconds=120)
-
-
 def prepare_document(doc):
     screens, reqs, mapping = deepcopy(doc.get('screens', [])), [], {}
     if not screens:
@@ -76,6 +70,7 @@ def prepare_document(doc):
         raise APIError(422, 'SCREEN_ID_DUPLICATE', '중복 화면 ID를 확인한 뒤 문서를 다시 등록하세요')
     if len(screens) > 100:
         raise APIError(413, 'EXTRACTION_LIMIT_EXCEEDED', '한 번에 100개 화면까지 추출할 수 있습니다')
+    # 페이지별 헤더·Description·Action 블록을 임시 블록 키로 색인해 어댑터가 추후 실제 UUID로 되돌릴 수 있게 준비한다.
     for s in screens:
         page = s['page']
         s.setdefault('author', '')
@@ -103,6 +98,7 @@ def prepare_document(doc):
 
 
 def remap_sources(value, mapping):
+    # 어댑터 초안의 임시 블록 키를 실제 DB 문서 블록 UUID로 재귀 치환하고 인용 일치 여부를 재확인한다.
     if isinstance(value, list):
         for child in value:
             remap_sources(child, mapping)
@@ -124,6 +120,7 @@ def remap_sources(value, mapping):
 def extract_draft(document_id, doc, client, progress, check_cancelled=None):
     screens, reqs, mapping = prepare_document(doc)
     conditions, usage = [], {'input_tokens': 0, 'output_tokens': 0}
+    # 화면 단위로 분해기를 호출하며 각 단계 직전 취소·설정 변경 여부를 확인해 불필요한 LLM 과금을 막는다.
     for index, s in enumerate(screens, 1):
         if check_cancelled:
             check_cancelled()
@@ -150,21 +147,13 @@ def extract_draft(document_id, doc, client, progress, check_cancelled=None):
     draft = build_extraction(artifact, screens, reqs, conditions)
     remap_sources(draft, mapping)
     draft['warnings'] = deepcopy(doc['warnings'])
-    # 검증은 실제 저장된 원문 UUID/인용/주제/화면 관계에 대해 수행한다.
+    # 검증은 실제 저장된 원문 UUID·인용·주제·화면 관계에 대해 수행한다.
     validate_extraction(draft, {'document_id': document_id, 'document_revision': doc['revision'], 'blocks': doc['blocks']})
     return draft, usage
 
 
-def transition_job(db, job, status, **fields):
-    data = {**job.data, **fields, 'status': status}
-    event = {**job_out(job), **fields, 'status': status}
-    data['events'] = [*job.data['events'], {'id': len(job.data['events'])+1, 'event': status, 'data': event}]
-    replace(db, job, data)
-
-
 def update_job(database, p, job_id, status, **fields):
     with database.session() as db:
-        from api.v2.testing import lock_project
         lock_project(db, p)
         job = resource(db, p, job_id, 'job')
         if job.data['status'] == 'cancelled':
@@ -174,10 +163,10 @@ def update_job(database, p, job_id, status, **fields):
 
 def run_extraction(database, p, d, job_id, config):
     client = None
+    # 전역 WORK_LOCK으로 백그라운드 추출·검증·생성 작업 간 대용량 LLM 호출 경합을 직렬화한다.
     with WORK_LOCK:
         try:
             with database.session() as db:
-                from api.v2.testing import lock_project
                 lock_project(db, p)
                 job = resource(db, p, job_id, 'job')
                 if job.data['status'] != 'queued':
@@ -192,7 +181,6 @@ def run_extraction(database, p, d, job_id, config):
 
             def check_cancelled():
                 with database.session() as db:
-                    from api.v2.testing import lock_project
                     lock_project(db, p)
                     job = resource(db, p, job_id, 'job')
                     if job.data['status'] == 'cancelled':
@@ -202,7 +190,6 @@ def run_extraction(database, p, d, job_id, config):
 
             def on_progress(done, total):
                 with database.session() as db:
-                    from api.v2.testing import lock_project
                     lock_project(db, p)
                     job = resource(db, p, job_id, 'job')
                     if job.data['status'] == 'cancelled':
@@ -213,8 +200,8 @@ def run_extraction(database, p, d, job_id, config):
 
             draft, usage = extract_draft(d, document, client, on_progress, check_cancelled=check_cancelled)
             from api.v2.documents import ingest_extraction
+            # 저장 직전 취소 여부와 모델·문서 버전·동시 수동 추가 여부를 재검증한 뒤 요구사항을 커밋한다.
             with database.session() as db:
-                from api.v2.testing import lock_project
                 lock_project(db, p)
                 job = resource(db, p, job_id, 'job')
                 if job.data['status'] == 'cancelled':
@@ -238,25 +225,3 @@ def run_extraction(database, p, d, job_id, config):
         finally:
             if client is not None and hasattr(client, 'close'):
                 client.close()
-
-
-def recover_interrupted(database):
-    with database.session() as db:
-        from sqlalchemy import select
-        from api.v2.storage import Resource
-        for job in db.scalars(select(Resource).where(Resource.kind == 'job')):
-            if job.data.get('operation') in ('extract_requirements', 'verify', 'generate_test_specification') and job.data.get('status') in ('queued', 'running'):
-                data = {**job.data, 'status': 'failed', 'error': {'code': 'SERVER_RESTARTED', 'message': '서버가 재시작되어 분석을 중단했습니다. 자동 재호출하지 않았습니다'}}
-                event = {**job_out(job), 'status': 'failed', 'error': data['error']}
-                data['events'] = [*job.data['events'], {'id': len(job.data['events'])+1, 'event': 'failed', 'data': event}]
-                replace(db, job, data)
-                if job.data.get('operation') == 'verify':
-                    run_id = job.data.get('request', {}).get('verification_run_id')
-                    if run_id:
-                        run = resource(db, job.project_id, run_id, 'verification_run')
-                        replace(db, run, {**run.data, 'status': 'failed', 'error': data['error'], 'missing_features': []})
-                if job.data.get('operation') == 'generate_test_specification':
-                    spec_id = job.data.get('request', {}).get('test_specification_id')
-                    if spec_id:
-                        spec = resource(db, job.project_id, spec_id, 'test_specification')
-                        spec.data = {**spec.data, 'status': 'failed', 'generation_status': 'failed', 'error': data['error']}

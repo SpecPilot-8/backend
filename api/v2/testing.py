@@ -1,16 +1,21 @@
+# - 담당 파트: 백엔드 API / 테스트 사양서
+# - 작성자: 이성규
+# - 페이지 개요: v2 테스트 사양서·케이스·수행 이력·설계 검토·배치 저장 통합 API 라우터
+# - 주요 기능:
+#   - 수동/AI 사양서 생성, 시험 케이스 추가, 절차 개정 및 수행 결과 상태 관리
+#   - 편집 표 원자적 배치 저장, 실행 요약, 설계 관점 점검 및 절차별 설계 적합성 검토 API 제공
+
 from copy import deepcopy
 from datetime import timezone
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import AwareDatetime, Field, model_validator
-from sqlalchemy import update
 
 from api.errors import APIError
-from api.models import now
-from api.v2.common import DB, Config, Input, Limit, Offset, RevisionQuery, make_job, missing
-from api.v2.storage import ProjectRecord, all_resources, create, historical, page, public, replace, replay, remember, resource
+from api.v2.common import DB, Config, Input, Limit, Offset, QUEUE_LOCK, RevisionQuery, make_job, missing, now
+from api.v2.storage import Resource, all_resources, create, historical, lock_project, page, public, remember, replace, replay, resource
 
 router = APIRouter(prefix='/api/v2/projects/{p}', tags=['v2 시험 절차·수행·표 저장'])
 EXPORT_SECTIONS = {'login': '01. 로그인', 'signup': '02. 회원가입', 'password_find': '03. 비밀번호찾기',
@@ -154,13 +159,6 @@ class Batch(Input):
     changes: list[Change] = Field(min_length=1, max_length=200)
 
 
-def lock_project(db, p):
-    # Serialize save/replay/attempt allocation within a project on SQLite and PostgreSQL.
-    result = db.execute(update(ProjectRecord).where(ProjectRecord.id == p).values(version=ProjectRecord.version))
-    if result.rowcount != 1:
-        raise APIError(404, 'RESOURCE_NOT_FOUND', '프로젝트를 찾을 수 없습니다')
-
-
 def spec_out(item, revision=None, db=None):
     data = public(item, revision, db)
     fixed = data.pop('requirements', [])
@@ -200,6 +198,7 @@ def validate_case(db, p, spec, data):
         raise APIError(422, 'VALIDATION_ERROR', '단계 키는 고유하고 순서는 1부터 연속이어야 합니다')
     combined = link_set(data['requirement_links'])
     union = set()
+    # 시나리오 상위 참조와 개별 단계 참조의 합집합이 같아야 하며 각 단계의 설계 관점도 해당 개정 조건과 일치해야 한다.
     for step in data['steps']:
         if step.get('design') is None:
             step.pop('design', None)
@@ -232,13 +231,14 @@ def changed_procedure(db, p, case, spec, procedure):
             old = previous.get(step['step_key'], {})
             if old and step.get('design') and step['design'] != old.get('design'):
                 raise APIError(422, 'VALIDATION_ERROR', '생성 당시 설계 설명은 직접 변경할 수 없습니다')
-            # 새 단계와 조건 연결을 바꾼 단계에는 과거의 생성 설명을 붙이지 않는다.
+            # 연결 조건이 바뀐 단계나 새로 추가된 단계는 과거 AI 설계 근거가 맞지 않으므로 설명을 비워 재검토 대상으로 분리한다.
             step['design'] = (deepcopy(old.get('design')) if
                               old.get('requirement_links') == step['requirement_links'] else None)
         data['requirement_links'] = links_from_steps(data['steps'])
     validate_case(db, p, spec.data, data)
     if data == case.data:
         raise APIError(422, 'EMPTY_CHANGE', '저장할 절차 변경이 없습니다')
+    # 절차가 바뀌면 기존 코드 기반 예측 결과는 구버전 기준이므로 unknown으로 초기화한다.
     data.update(revision=case.data['revision']+1, prediction={'status': 'unknown', 'reason': '절차가 수정되어 예측 갱신이 필요합니다', 'verification_run_id': spec.data['verification_run_id'], 'primary_chunk_ids': []})
     return data
 
@@ -320,7 +320,6 @@ def generate(p: str, body: GenerationRequest, db: DB, settings: Config, request:
     needed = [] if enabled else missing('model_connection', '서버 모델 연결 설정이 필요합니다')
     if run.data['status'] != 'completed':
         needed += missing('verification_result', '선택 실행의 코드 판정도 아직 완료되지 않았습니다')
-    from api.v2.extraction_runner import QUEUE_LOCK
     from api.v2.test_generation_runner import PROMPT_VERSION, RULES_VERSION, run_generation
     from testgen.design import build_plan
     with QUEUE_LOCK:
@@ -408,6 +407,7 @@ def procedure(p: str, tc: str, body: ProcedureEdit, db: DB):
 
 
 def aggregate_execution(case, results):
+    # 단계별 판정 중 failed, on_hold, passed, not_run 순으로 우선 적용해 케이스 상태 집계
     statuses = {r['step_key']: r['status'] for r in results}
     values = [statuses.get(s['step_key'], 'not_run') for s in case['steps']]
     if 'failed' in values:
@@ -492,16 +492,19 @@ def save_batch(p: str, t: str, body: Batch, db: DB):
     lock_project(db, p)
     scope = f'edit-batch:{t}'
     request = body.model_dump(mode='json', exclude_unset=True)
+    # 동일 client_save_id 재시도면 기존 응답을 그대로 돌려 멱등성을 보장
     saved = replay(db, p, scope, body.client_save_id, request)
     if saved is not None:
         return saved
     spec = resource(db, p, t, 'test_specification')
     ensure_editable(spec)
+    # 기준 사양서 개정 불일치와 같은 시험 케이스 중복 수정 여부를 쓰기 전에 선검사
     if spec.data['revision'] != body.base_specification_revision:
         raise APIError(409, 'VERSION_CONFLICT', '사양서 버전이 변경되었습니다', details={'current_revision': spec.data['revision'], 'items': []})
     ids = [c.test_case_id for c in body.changes]
     if len(ids) != len(set(ids)):
         raise APIError(422, 'VALIDATION_ERROR', '같은 시험을 중복 변경할 수 없습니다')
+    # 전체 변경분을 먼저 검증해 planned에 누적하고 하나라도 실패하면 부분 반영 차단
     planned = []
     for change in body.changes:
         try:
@@ -526,6 +529,7 @@ def save_batch(p: str, t: str, body: Batch, db: DB):
         except APIError as error:
             error.details = {'items': [{'test_case_id': change.test_case_id, 'field': 'procedure' if change.procedure else 'execution', 'code': error.code, **error.details}]}
             raise
+    # 검증을 모두 통과한 변경만 실제 리소스에 반영하고 사양서 case_versions 갱신
     changed_cases, changed_executions = [], []
     versions = deepcopy(spec.data['case_versions'])
     for change, case, case_data, execution_item, execution_data in planned:
@@ -575,3 +579,84 @@ def execution_summary(p: str, t: str, db: DB, revision: RevisionQuery = None, re
     def counts(values):
         return {'total': len(values), **{k: values.count(k) for k in ('not_run', 'passed', 'failed', 'on_hold')}}
     return {'scenario_summary': counts(scenarios), 'step_summary': counts(steps)}
+
+
+class ConditionReview(Input):
+    requirement_id: str
+    requirement_revision: int = Field(ge=1)
+    condition_id: str
+    decision: Literal['adequate', 'needs_changes', 'uncertain']
+    reason: str = Field(min_length=1, max_length=2000, pattern=r'\S')
+
+
+class SaveReview(Input):
+    test_case_revision: int = Field(ge=1)
+    base_version: int = Field(ge=0)
+    client_review_id: UUID
+    items: list[ConditionReview] = Field(min_length=1, max_length=200)
+
+
+def review_key(item):
+    return item['requirement_id'], item['requirement_revision'], item['condition_id']
+
+
+def review_identity(p, tc, revision):
+    return str(uuid5(NAMESPACE_URL, f'specpilot:test-design-review:{p}:{tc}:{revision}'))
+
+
+def review_for_case(db, p, case):
+    """시험 적합성에 대한 사람의 검토를 절차 개정별로 보존한다. 실제 수행 결과와 별개다."""
+    # 케이스 ID와 절차 개정 조합으로 결정된 uuid5 키를 조회해 개정별 설계 검토를 분리 보관
+    item = db.get(Resource, review_identity(p, case['id'], case['revision']))
+    if item is not None and (item.project_id != p or item.kind != 'test_design_review'):
+        raise APIError(409, 'RESOURCE_CONFLICT', '설계 검토 저장소를 확인해야 합니다')
+    saved = public(item) if item else {'version': 0, 'items': [], 'updated_at': None}
+    # 연결된 조건 전체 대비 판정 집계 중 needs_changes, uncertain, adequate, pending 순으로 상태 결정
+    total = len(link_set(case['requirement_links']))
+    counts = {s: sum(i['decision'] == s for i in saved['items']) for s in ('adequate', 'needs_changes', 'uncertain')}
+    status = ('needs_changes' if counts['needs_changes'] else 'uncertain' if counts['uncertain']
+              else 'adequate' if total and counts['adequate'] == total else 'pending')
+    return {**saved, 'test_case_id': case['id'], 'test_case_revision': case['revision'], 'origin': 'manual',
+            'status': status, 'summary': {'linked_conditions': total, 'reviewed_conditions': len(saved['items']), **counts},
+            'limitations': ['사람이 기록한 시험 설계 검토입니다. 실제 구현 충족이나 시험 수행 통과를 뜻하지 않습니다.']}
+
+
+@router.get('/test-cases/{tc}/design-review', tags=['v2 시험 설계 적합성 검토'])
+def get_review(p: str, tc: str, db: DB, revision: RevisionQuery = None):
+    case = resource(db, p, tc, 'test_case')
+    return review_for_case(db, p, {'id': tc, **historical(db, case, revision)})
+
+
+@router.put('/test-cases/{tc}/design-review', tags=['v2 시험 설계 적합성 검토'])
+def save_review(p: str, tc: str, body: SaveReview, db: DB):
+    lock_project(db, p)
+    request = body.model_dump(mode='json')
+    scope = f'test-design-review:{tc}'
+    # 프로젝트 잠금 상태에서 동일 client_review_id 재요청이면 기존 응답 재사용
+    previous = replay(db, p, scope, body.client_review_id, request)
+    if previous is not None:
+        return previous
+    case = resource(db, p, tc, 'test_case')
+    ensure_editable(resource(db, p, case.data['test_specification_id'], 'test_specification'))
+    if case.data['revision'] != body.test_case_revision:
+        raise APIError(409, 'CASE_REVISION_CHANGED', '시험 절차가 변경되었습니다. 최신 절차로 다시 검토하세요',
+                       details={'current_revision': case.data['revision']})
+    current = review_for_case(db, p, {'id': tc, **case.data})
+    if current['version'] != body.base_version:
+        raise APIError(409, 'VERSION_CONFLICT', '다른 설계 검토가 먼저 저장되었습니다',
+                       details={'current_version': current['version']})
+    items = request['items']
+    keys = [review_key(i) for i in items]
+    if len(keys) != len(set(keys)) or not set(keys) <= link_set(case.data['requirement_links']):
+        raise APIError(422, 'VALIDATION_ERROR', '이 시험 개정에 연결된 수락 조건만 중복 없이 검토할 수 있습니다')
+    combined = {review_key(i): i for i in current['items']}
+    combined.update({review_key(i): i for i in items})
+    data = {'test_case_id': tc, 'test_case_revision': body.test_case_revision,
+            'version': current['version'] + 1, 'items': list(combined.values()), 'updated_at': now()}
+    if current['version']:
+        replace(db, resource(db, p, current['id'], 'test_design_review'), data, current['version'])
+    else:
+        create(db, p, 'test_design_review', data, review_identity(p, tc, body.test_case_revision))
+    result = review_for_case(db, p, {'id': tc, **case.data})
+    remember(db, p, scope, body.client_review_id, request, result)
+    return result
