@@ -104,7 +104,7 @@ def generation(linked, monkeypatch):
             data["scenarios"][0]["title"] = ""
         return LLMResponse(data, "", "test-model", {"input_tokens": 10, "output_tokens": 5})
 
-    monkeypatch.setattr(runner, "analysis_client", lambda _: SimpleNamespace(complete_json=complete))
+    monkeypatch.setattr(runner, "generation_client", lambda _: SimpleNamespace(complete_json=complete))
     body = {
         "verification_run_id": submitted["result_ref"]["id"],
         "requirement_ids": [r["id"] for r in reqs],
@@ -213,7 +213,7 @@ def test_provider_sdk_rejection_is_safe_and_does_not_retry(generation, monkeypat
             body={"error": {"message": KEY}},
         )
 
-    monkeypatch.setattr(runner, "analysis_client", lambda _: SimpleNamespace(complete_json=reject))
+    monkeypatch.setattr(runner, "generation_client", lambda _: SimpleNamespace(complete_json=reject))
     _, job, spec = start(generation)
     assert job["status"] == "failed" and job["error"]["code"] == "LLM_REQUEST_REJECTED"
     assert attempts == [1] and KEY not in str(job) + str(spec)
@@ -318,6 +318,9 @@ def test_missing_and_assumed_views_are_not_reported_as_written(generation, mode)
     review = c.get(f'/api/v2/projects/{p}/test-specifications/{spec["id"]}/design-review').json()
     if mode == 'overlap-intent':
         assert review['summary']['intents_missing'] == 0
+        # 겹친 미포함 보고를 지운 사실은 경고로 남는다.
+        assert any(w['code'] == 'GENERATION_OUTPUT_NORMALIZED' for w in spec['warnings'] + c.get(
+            f'/api/v2/projects/{p}/test-specifications/{spec["id"]}').json().get('warnings', []))
         return
     key = 'intents_missing' if mode == 'missing-intent' else 'intents_review_needed'
     assert review['summary'][key] > 0
