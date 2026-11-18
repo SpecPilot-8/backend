@@ -7,12 +7,14 @@
 
 """웹 문서의 고정 원문 → 기존 조건 분해기 → 검증된 v2 초안. PostgreSQL 불필요."""
 from copy import deepcopy
+from time import perf_counter
 
 import anthropic
 from jsonschema import Draft202012Validator
 
 from adapters.v2_extraction import build_artifact, build_extraction
 from api.errors import APIError
+from api.v2.cost import estimate_cost_usd
 from api.v2.common import WORK_LOCK, transition_job
 from api.v2.document_contracts import validate_extraction
 from api.v2.server_llm import analysis_client, fail
@@ -198,7 +200,9 @@ def run_extraction(database, p, d, job_id, config):
                         raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되어 추출을 중단했습니다')
                     transition_job(db, job, 'running', progress={'stage': 'condition_extraction', 'completed': done, 'total': total})
 
+            started = perf_counter()
             draft, usage = extract_draft(d, document, client, on_progress, check_cancelled=check_cancelled)
+            duration_ms = round((perf_counter() - started) * 1000)
             from api.v2.documents import ingest_extraction
             # 저장 직전 취소 여부와 모델·문서 버전·동시 수동 추가 여부를 재검증한 뒤 요구사항을 커밋한다.
             with database.session() as db:
@@ -213,7 +217,8 @@ def run_extraction(database, p, d, job_id, config):
                 ids = ingest_extraction(db, p, d, draft)
                 transition_job(db, job, 'completed', result_ref={'kind': 'document', 'id': d},
                        result={'requirement_count': len(ids), 'condition_count': sum(len(r['conditions']) for r in draft['requirements'])},
-                       usage=usage, missing_features=[])
+                       usage=usage, duration_ms=duration_ms,
+                       estimated_cost_usd=estimate_cost_usd(usage, config.llm_model), missing_features=[])
         except APIError as error:
             if error.code == 'JOB_CANCELLED':
                 return

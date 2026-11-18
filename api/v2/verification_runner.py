@@ -19,6 +19,7 @@ from time import perf_counter
 from jsonschema import Draft202012Validator
 
 from api.errors import APIError
+from api.v2.cost import add_stage_costs
 from api.v2.common import WORK_LOCK, transition_job
 from api.v2.server_llm import analysis_client, fail
 from api.v2.storage import Resource, all_resources, create, lock_project, project, public, replace, resource
@@ -322,6 +323,7 @@ def run_verification(database, p, run_id, config):
                         raise APIError(409, 'JOB_CANCELLED', '작업이 중단되었습니다')
                     if project(db, p).config_version != version:
                         raise APIError(409, 'CONFIG_CHANGED', '검증 중 모델 설정이 변경되었습니다. 완료된 이전 결과는 원래 설정으로 보존합니다')
+                    add_stage_costs(metrics, config.llm_model)
                     job.data = {**job.data, 'usage': dict(usage), 'analysis_metrics': deepcopy(metrics)}
                     ingest_verdict(db, p, run_id, draft, trusted, graph)
                     if resource(db, p, run_id, 'verification_run').data['status'] != 'completed':
@@ -358,7 +360,7 @@ def run_verification(database, p, run_id, config):
                            if key in error.details}
             if diagnostics:
                 failure['details'] = diagnostics
-            mark_failed(database, p, run_id, job_id, failure, metrics)
+            mark_failed(database, p, run_id, job_id, failure, add_stage_costs(metrics, config.llm_model))
         except Exception:
             mark_failed(database, p, run_id, job_id, {'code': 'VERIFICATION_FAILED',
                 'message': '코드 검증에 실패했습니다. 서버 모델과 화면 진입 파일 설정을 확인하세요. 미완료 항목은 미분석으로 남깁니다'}, metrics)
