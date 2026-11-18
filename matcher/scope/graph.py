@@ -111,6 +111,7 @@ def build_identifier_edges(g: Graph) -> None:
         if lang == "java" and c.chunk_type == "field" and "#" in (c.symbol_fqn or ""):
             class_fields[c.symbol_fqn.split("#", 1)[0]].add(cid)
 
+    types = _JavaTypes(g, class_fields)
     for (lang, name, kind), targets in index.items():
         if lang == "java" and kind == "method":
             pattern = re.compile(rf"(?<![\w$]){re.escape(name)}\s*\(")
@@ -133,13 +134,20 @@ def build_identifier_edges(g: Graph) -> None:
                 # 이름의 오버로드(GET API용 / POST 폼용 checkPasswordResetTarget)가 서로
                 # 연결되어, API 하나를 따라갔다가 다른 화면의 템플릿까지 번진다.
                 calls = [m for m in matches if not _is_java_declaration(c.content, m.start())]
-                qualified = any(c.content[:m.start()].rstrip().endswith(".") for m in calls)
-                unqualified = any(not c.content[:m.start()].rstrip().endswith(".") for m in calls)
                 resolved = set()
-                if qualified:
-                    resolved |= remote
-                if unqualified:
-                    resolved |= local or remote
+                for m in calls:
+                    before = c.content[:m.start()].rstrip()
+                    if not before.endswith("."):
+                        resolved |= local or remote
+                        continue
+                    # 수신 객체의 선언 타입을 알면 그 클래스(와 구현·하위 클래스)의 메서드만
+                    # 잇는다. 모르면 예전처럼 다른 파일의 동명 메서드 전부로 둔다 (#50).
+                    # 예: memberService.signup( 이 VendorService.signup 까지 끌어오던 문제.
+                    owners = types.receiver_owners(c, before[:-1])
+                    if owners is None:
+                        resolved |= remote
+                    else:
+                        resolved |= {t for t in targets if _owner(g.chunks[t]) in owners}
                 resolved.discard(cid)
             elif cid in targets:
                 # JS는 선언문 자체가 이름과 일치하므로 자기 정의와 참조를 구분할 수 없다.
@@ -161,6 +169,67 @@ def build_identifier_edges(g: Graph) -> None:
                 if lang == "java" and tc.chunk_type == "class":
                     for f in class_fields.get(tc.symbol_fqn, ()):
                         g.add(cid, f)
+
+
+def _owner(c: ChunkRow) -> str:
+    """Java 메서드 청크가 속한 클래스의 단순 이름 (pkg.MemberService.signup -> MemberService)."""
+    parts = (c.symbol_fqn or "").split("#", 1)[0].rsplit(".", 2)
+    return parts[-2] if len(parts) >= 2 else ""
+
+
+class _JavaTypes:
+    """`recv.method(` 호출의 수신 객체 타입을 선언문에서 읽는다 (규칙 기반, 추정 없음).
+
+    찾는 곳은 호출하는 청크 본문(지역 변수·매개변수)과 같은 클래스의 필드 청크
+    (`private final MemberService memberService;`)뿐이다. 타입이 프로젝트 안 클래스가
+    아니거나 선언을 못 찾으면 None을 돌려 호출부가 예전 규칙으로 처리하게 한다.
+    """
+
+    def __init__(self, g: Graph, class_fields: dict[str, set[int]]):
+        self.g, self.class_fields = g, class_fields
+        self.classes: dict[str, str] = {}  # 단순 이름 -> fqn
+        self.subtypes: dict[str, set[str]] = defaultdict(set)  # 상위 타입 -> 구현·하위 클래스
+        for c in g.chunks.values():
+            if language(c) != "java" or c.chunk_type != "class" or not c.symbol_fqn:
+                continue
+            name = c.symbol_fqn.rsplit(".", 1)[-1]
+            self.classes[name] = c.symbol_fqn
+            header = c.content.split("{", 1)[0]
+            for parents in re.findall(r"\b(?:extends|implements)\s+([^{]+?)(?=\bimplements\b|$)", header):
+                for parent in re.findall(rf"({_IDENT})(?:<[^>]*>)?\s*(?:,|$)", parents.strip()):
+                    self.subtypes[parent].add(name)
+
+    def _family(self, name: str) -> set[str]:
+        out, stack = set(), [name]
+        while stack:
+            n = stack.pop()
+            if n not in out:
+                out.add(n)
+                stack.extend(self.subtypes.get(n, ()))
+        return out
+
+    def receiver_owners(self, caller: ChunkRow, before_dot: str) -> set[str] | None:
+        m = re.search(rf"({_IDENT})$", before_dot)
+        if not m:
+            return None  # getFoo().bar( 같은 연쇄 호출은 반환 타입을 모른다
+        recv = m.group(1)
+        caller_class = (caller.symbol_fqn or "").split("#", 1)[0]
+        if caller.chunk_type != "class":
+            caller_class = caller_class.rsplit(".", 1)[0]
+        if recv == "this":
+            name = caller_class.rsplit(".", 1)[-1]
+            return self._family(name) if name in self.classes else None
+        if recv == "super":
+            return None
+        if recv in self.classes:
+            return self._family(recv)  # 정적 호출 PasswordValidator.isValid(
+        decl = re.compile(rf"({_IDENT})(?:<[^;(){{}}=]*>)?(?:\[\])?\s+{re.escape(recv)}\s*[;=,)]")
+        sources = [caller.content] + [self.g.chunks[f].content for f in sorted(self.class_fields.get(caller_class, ()))]
+        for text in sources:
+            for d in decl.finditer(text):
+                if d.group(1) in self.classes:
+                    return self._family(d.group(1))
+        return None
 
 
 _NOT_A_TYPE = {"return", "new", "throw", "else", "case", "yield"}
