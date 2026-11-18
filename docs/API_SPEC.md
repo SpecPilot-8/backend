@@ -288,6 +288,8 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
 
 2026-11-18 추가: `GET /test-specifications/{t}/retest?verification_run_id=`는 다시 시험해야 하는 시험을 돌려준다. 사유는 두 가지다. `requirement_revised`는 시험이 연결된 요구사항 개정보다 현재 요구사항이 새로울 때, `verdict_changed`는 사양서의 기준 검증 실행과 비교 실행 사이에 연결 조건의 판정이 바뀌었을 때다. 비교 실행을 지정하지 않으면 기준 실행 이후 가장 최근에 완료된 실행을 쓴다. 시험 데이터는 바꾸지 않고 조회할 때마다 계산한다.
 
+2026-11-18 추가: `GET /test-cases/{tc}/evidence?revision=n`은 시험 단계마다 연결된 조건만 골라 그 조건의 판정과 근거 코드 위치(파일·줄)를 돌려준다. 같은 요구사항의 다른 조건 근거는 섞지 않는다. Excel `분석 상세` 시트의 `코드 근거` 칸도 같은 기준으로 `[판정] 요구사항키 조건문`과 `파일:시작-끝` 줄로 출력한다(이전에는 연결 요구사항 전체의 근거를 JSON으로 넣었다).
+
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
 | POST | `/projects/{p}/test-specifications/generate` | `{verification_run_id,requirement_ids}` → 202 Job |

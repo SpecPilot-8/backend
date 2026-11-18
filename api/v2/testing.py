@@ -728,3 +728,42 @@ def retest_report(db, p, spec, revision=None, verification_run_id=None):
 def review_retest(p: str, t: str, db: DB, revision: RevisionQuery = None, verification_run_id: str | None = None):
     # 요구사항 개정·판정 변화에 연결된 시험을 retest_required로 표시한다. verification_run_id가 없으면 최신 완료 실행과 비교한다.
     return retest_report(db, p, resource(db, p, t, 'test_specification'), revision, verification_run_id)
+
+
+def step_evidence(run_data, step):
+    """단계에 연결된 조건만 골라 그 조건의 판정과 코드 근거 위치를 돌려준다 (요구사항 전체 근거가 아님)."""
+    items = []
+    for link in step['requirement_links']:
+        result = run_data['results'].get(link['requirement_id']) or {}
+        evidence = {e['id']: e for e in result.get('evidence', [])}
+        verdicts = {v['condition_id']: v for v in result.get('condition_verdicts', [])}
+        req = next((r for r in run_data['requirements'] if r['id'] == link['requirement_id']), {})
+        texts = {c['id']: c['text'] for c in req.get('conditions', [])}
+        for cid in link['condition_ids']:
+            v = verdicts.get(cid, {})
+            items.append({'requirement_id': link['requirement_id'], 'requirement_key': req.get('stable_key', ''),
+                          'condition_id': cid, 'condition_text': texts.get(cid, ''),
+                          'status': v.get('status'),
+                          'evidence': [{k: evidence[i][k] for k in ('id', 'chunk_id', 'file_path', 'start_line', 'end_line')}
+                                       for i in v.get('evidence_ids', []) if i in evidence]})
+    return items
+
+
+def step_evidence_text(items):
+    lines = []
+    for item in items:
+        key = f"{item['requirement_key']} " if item.get('requirement_key') else ''
+        lines.append(f"[{item['status'] or '판정 없음'}] {key}{item['condition_text']}")
+        lines += [f"  {e['file_path']}:{e['start_line']}-{e['end_line']}" for e in item['evidence']] or ['  근거 코드 없음']
+    return '\n'.join(lines)
+
+
+@router.get('/test-cases/{tc}/evidence')
+def case_evidence(p: str, tc: str, db: DB, revision: RevisionQuery = None):
+    # 시험 단계마다 연결된 조건의 판정과 근거 코드 위치만 돌려준다. 같은 요구사항의 다른 조건 근거는 섞지 않는다.
+    case = historical(db, resource(db, p, tc, 'test_case'), revision)
+    spec = resource(db, p, case['test_specification_id'], 'test_specification')
+    run = resource(db, p, spec.data['verification_run_id'], 'verification_run')
+    return {'test_case_id': tc, 'verification_run_id': run.id, 'snapshot_id': run.data['snapshot_id'],
+            'steps': [{'step_key': s['step_key'], 'order': s['order'], 'conditions': step_evidence(run.data, s)}
+                      for s in case['steps']]}

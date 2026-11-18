@@ -259,7 +259,7 @@ def test_export(p: str, body: TestExport, db: DB, config: Config):
     # 상세 분석 옵션이 켜진 경우 요구사항-시험 대응, 설계 관점 점검, 원문·근거·수행 이력 대조 시트를 추가로 생성한다.
     if body.include_analysis_detail:
         from testgen.design import design_review
-        from api.v2.testing import review_for_case
+        from api.v2.testing import review_for_case, step_evidence, step_evidence_text
         human_reviews = {case['id']: review_for_case(db, p, case) for case in cases}
         comparison = []
         steps_by_condition = {}
@@ -320,7 +320,7 @@ def test_export(p: str, body: TestExport, db: DB, config: Config):
                                  else 'AI 설계 설명·원문 대조 필요' if design else '설계 사유 미기록')
                 details.append([case['test_no'], step['order'], case['revision'], json.dumps(step['requirement_links'],ensure_ascii=False),
                                 json.dumps(case['prediction'],ensure_ascii=False), '\n'.join(x['original_text'] for x in reqs),
-                                json.dumps([run.data['results'].get(x['id'], {}).get('evidence', []) for x in reqs],ensure_ascii=False),
+                                step_evidence_text(step_evidence(run.data, step)),
                                 e['attempt_no'] if e else None, r.get('status','not_run'), r.get('actual',''), r.get('notes',''),
                                 r.get('performed_at'), e['environment'] if e else '', e['tested_build'] if e else '',
                                 case_design.get('rationale', ''), design.get('rationale', ''), design.get('input_rationale', ''), design_status])
