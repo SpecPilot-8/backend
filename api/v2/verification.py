@@ -166,3 +166,61 @@ def detail(p: str, v: str, r: str, db: DB):
             'findings': [], 'evidence': [], 'call_flow': {'nodes': [], 'edges': [], 'unresolved': []},
             'counts': {'findings': 0, 'affected_conditions': 0, 'evidence_locations': 0, 'files': 0},
             'warnings': item.data['missing_features']}
+
+
+def _run_states(item):
+    """실행 결과를 요구사항·조건의 stable_key 기준 상태표로 편다. 개정으로 UUID가 바뀌어도 논리 ID로 맞춘다."""
+    reqs, conds = {}, {}
+    for req in item.data['requirements']:
+        result = item.data['results'].get(req['id'])
+        reqs[req['stable_key']] = {'requirement_id': req['id'], 'revision': req['revision'], 'title': req['title'],
+                                   'status': result['status'] if result else None}
+        verdicts = {c['condition_id']: c for c in (result or {}).get('condition_verdicts', [])}
+        for c in req.get('conditions', []):
+            v = verdicts.get(c['id'])
+            conds[c['stable_key']] = {'requirement_key': req['stable_key'], 'condition_id': c['id'], 'text': c['text'],
+                                      'status': v['status'] if v else None,
+                                      'message_match': v.get('message_match') if v else None}
+    return reqs, conds
+
+
+def _diff(before, after, fields):
+    changes = []
+    for key in sorted(before.keys() | after.keys()):
+        a, b = before.get(key), after.get(key)
+        if a is None or b is None:
+            kind = 'added' if a is None else 'removed'
+        elif any(a.get(f) != b.get(f) for f in fields):
+            kind = 'changed'
+        else:
+            continue
+        current = b or a
+        changes.append({'key': key, 'change': kind, **{k: v for k, v in current.items() if k not in fields},
+                        **{f'before_{f}': a.get(f) if a else None for f in fields},
+                        **{f'after_{f}': b.get(f) if b else None for f in fields}})
+    return changes
+
+
+@router.get('/{v}/compare')
+def compare(p: str, v: str, base: str, db: DB):
+    # 두 실행의 요구사항·조건 판정을 나란히 비교한다. 코드 수정 전(base)과 후(v)의 상태 변화를 보여 준다.
+    after_item, before_item = resource(db, p, v, 'verification_run'), resource(db, p, base, 'verification_run')
+    before_reqs, before_conds = _run_states(before_item)
+    after_reqs, after_conds = _run_states(after_item)
+    requirements = _diff(before_reqs, after_reqs, ('status', 'revision'))
+    conditions = _diff(before_conds, after_conds, ('status', 'message_match'))
+    status_changes = [c for c in conditions if c['change'] == 'changed' and c['before_status'] != c['after_status']]
+    return {
+        'base_run_id': base, 'run_id': v,
+        'base_snapshot_id': before_item.data['snapshot_id'], 'snapshot_id': after_item.data['snapshot_id'],
+        'summary': {
+            'requirements_changed': sum(c['change'] == 'changed' for c in requirements),
+            'requirements_added': sum(c['change'] == 'added' for c in requirements),
+            'requirements_removed': sum(c['change'] == 'removed' for c in requirements),
+            'conditions_status_changed': len(status_changes),
+            'improved': sum(c['after_status'] == 'implemented' for c in status_changes),
+            'regressed': sum(c['before_status'] == 'implemented' for c in status_changes),
+        },
+        'requirements': requirements,
+        'conditions': conditions,
+    }
