@@ -32,7 +32,7 @@ def test_test_export_steps_actual_results_and_literal_text(client, v2_project, v
     assert r.status_code == 200
     job = client.post(base(v2_project) + '/exports/test-specification', json=export_body(v2_case,3,True)).json()
     w, _ = workbook(client,v2_project,job)
-    assert w.sheetnames == ['개정이력','00. 목차','04. 공지사항','요구사항·시험 대응','시험 설계 점검','분석 상세']
+    assert w.sheetnames == ['개정이력','00. 목차','04. 공지사항','요구사항·시험 대응','시험 설계 점검','품질 점검','분석 상세']
     assert w['시험 설계 점검']['F2'].value == '관점 연결 없음'
     assert w['분석 상세']['R2'].value == '설계 사유 미기록'
     s = w['04. 공지사항']
@@ -118,3 +118,12 @@ def test_export_includes_original_conditions_and_pins_manual_review(client, v2_p
     assert client.put(url, json=request).status_code == 200
     _, pinned = workbook(client, v2_project, response.json())
     assert pinned == content
+
+
+def test_quality_review_endpoint(client, v2_project, v2_case):
+    url = base(v2_project) + f'/test-specifications/{v2_case["test_specification_id"]}/quality'
+    r = client.get(url)
+    assert r.status_code == 200
+    body = r.json()
+    assert body['summary']['tests'] == 1
+    assert set(body) >= {'summary', 'boundary', 'duplicates', 'invented', 'borrowed'}

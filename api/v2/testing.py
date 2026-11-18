@@ -366,6 +366,21 @@ def review_design(p: str, t: str, db: DB, revision: RevisionQuery = None):
     return {'test_specification_id': t, **design_review(fixed, current_cases(db, p, spec, revision))}
 
 
+def quality_report(spec_data, cases):
+    """사양서 시험을 규칙으로 점검한다. LLM을 부르지 않으므로 조회할 때마다 다시 계산한다."""
+    from testgen.quality import check
+    report = check(spec_data['requirements'], cases)
+    return {'summary': report.summary(), 'boundary': report.boundary, 'duplicates': report.duplicates,
+            'invented': report.invented, 'borrowed': report.borrowed}
+
+
+@router.get('/test-specifications/{t}/quality')
+def review_quality(p: str, t: str, db: DB, revision: RevisionQuery = None):
+    # 경계값 정확·바깥값 누락, 단계·시험 중복, 기획서에 없는 문구, 다른 요구사항 문구 혼입을 돌려준다.
+    spec = resource(db, p, t, 'test_specification')
+    return {'test_specification_id': t, **quality_report(historical(db, spec, revision), current_cases(db, p, spec, revision))}
+
+
 @router.post('/test-cases', status_code=201)
 def add_case(p: str, body: CaseCreate, db: DB):
     lock_project(db, p)

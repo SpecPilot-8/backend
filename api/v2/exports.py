@@ -324,6 +324,18 @@ def test_export(p: str, body: TestExport, db: DB, config: Config):
                                 e['attempt_no'] if e else None, r.get('status','not_run'), r.get('actual',''), r.get('notes',''),
                                 r.get('performed_at'), e['environment'] if e else '', e['tested_build'] if e else '',
                                 case_design.get('rationale', ''), design.get('rationale', ''), design.get('input_rationale', ''), design_status])
+        from api.v2.testing import quality_report
+        quality = quality_report(spec_data, cases)
+        quality_rows = [['경계값', b['requirement'], b['limit'],
+                         '누락: ' + ', '.join(b['missing']) if b['missing'] else '충족', f"연결 단계 {b['step_count']}개"]
+                        for b in quality['boundary']]
+        quality_rows += [['중복', '', '같은 시험 안 단계' if d['kind'] == 'same_test' else '통째로 같은 시험',
+                          f"{d['count']}회", '\n'.join(d['where'])] for d in quality['duplicates']]
+        quality_rows += [['기획서에 없는 문구', ', '.join(u['requirements']), u['message'], '', u['where']]
+                         for u in quality['invented']]
+        quality_rows += [['다른 요구사항 문구', ', '.join(u['requirements']), u['message'],
+                          '출처: ' + ', '.join(u['found_in']), u['where']] for u in quality['borrowed']]
+        simple_sheet(book, '품질 점검', ['점검 항목', '요구사항', '대상', '결과', '위치'], quality_rows, warnings)
         simple_sheet(book, '분석 상세', ['시험번호','단계','절차 개정','조건 연결','코드 예측','원문','코드 근거','회차','수행 상태','실제 결과','수행 메모','수행 시각','환경','실제 빌드',
                      '시험 설계 이유','절차 선정 이유','입력값·역할 선정 이유','설계 설명 상태'], details, warnings)
     selection = {**body.model_dump(), 'verification_run_version': run.version, 'snapshot_id': run.data['snapshot_id'], 'case_versions': spec_data['case_versions'], 'executions': execution_refs}

@@ -10,6 +10,7 @@
 from collections import defaultdict
 from copy import deepcopy
 from hashlib import sha256
+from time import perf_counter
 import json
 
 import anthropic
@@ -17,6 +18,7 @@ from jsonschema import Draft202012Validator
 
 from adapters.v2_testgen import build_test_generation
 from api.errors import APIError
+from api.v2.cost import estimate_cost_usd
 from api.v2.common import WORK_LOCK, transition_job
 from api.v2.server_llm import analysis_client, fail
 from api.v2.storage import lock_project, project, public, resource
@@ -288,9 +290,12 @@ def run_generation(database, p, spec_id, config):
                         usage=dict(used),
                     )
 
+            started = perf_counter()
             output, usage, hashes, uncovered = generate_draft(
                 run, groups, client, config.llm_api_key, config.llm_model, progress, check_cancelled=check_cancelled
             )
+            duration_ms = round((perf_counter() - started) * 1000)
+            cost = estimate_cost_usd(usage, config.llm_model)
             with database.session() as db:
                 lock_project(db, p)
                 job = resource(db, p, job_id, "job")
@@ -311,6 +316,8 @@ def run_generation(database, p, spec_id, config):
                     "uncovered_conditions": uncovered,
                     "input_hashes": hashes,
                     "usage": usage,
+                    "duration_ms": duration_ms,
+                    "estimated_cost_usd": cost,
                     'design_gaps': output['design_gaps'],
                 }
                 if output["test_candidates"]:
@@ -325,6 +332,8 @@ def run_generation(database, p, spec_id, config):
                     job,
                     "completed",
                     usage=usage,
+                    duration_ms=duration_ms,
+                    estimated_cost_usd=cost,
                     progress={"stage": "test_generation", "completed": len(groups), "total": len(groups)},
                     result_ref={"kind": "test_specification", "id": spec_id},
                     result={
