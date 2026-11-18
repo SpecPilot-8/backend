@@ -95,3 +95,24 @@ def test_ocr_warning_survives_artifact_adoption():
     artifact, _ = build()
     assert any(w['code'] == 'OCR_SOURCE_REVIEW' for w in artifact['warnings'])
     assert all(w['block_ids'] for w in artifact['warnings'])
+
+
+def test_changed_number_with_correct_quote_goes_to_review():
+    # 인용은 원문 그대로지만 조건 문장의 숫자가 바뀐 경우. 인용 검증만으로는 통과하므로 수치 대조가 잡아야 한다.
+    conds = [c for c in CONDS if c["requirement_key"] != "NOTICE-002-1"] + [
+        cond("NOTICE-002-1", 1, "제목은 100자까지 입력할 수 있다.", "제목은 50자까지 입력할 수 있다."),
+        cond("NOTICE-002-1", 2, "50자가 넘어가면 입력할 수 없다.", "50자가 넘어가면 입력을 할 수 없다."),
+    ]
+    artifact = build_artifact("doc-1", 1, "sha256:x", SCREENS, REQS)
+    draft = build_extraction(artifact, SCREENS, REQS, conds)
+    validate_extraction(draft, artifact)
+    notice = next(r for r in draft["requirements"] if r["stable_key"] == "NOTICE-002-1")
+    assert notice["review_reasons"] == ["조건 1: 수치 '100자'가 원문 인용에 없음"]
+    assert notice["conditions"][0]["ambiguity"] == "수치 '100자'가 원문 인용에 없음"
+    assert notice["conditions"][1]["ambiguity"] == ""
+
+
+def test_matching_numbers_add_no_review_reason():
+    _, draft = build()
+    notice = next(r for r in draft["requirements"] if r["stable_key"] == "NOTICE-002-1")
+    assert notice["review_reasons"] == []
