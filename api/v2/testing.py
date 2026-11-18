@@ -304,10 +304,13 @@ def prepare_generation(p: str, body: GenerationRequest, db: DB, settings: Config
     if not enabled:
         raise APIError(409, 'LLM_NOT_CONFIGURED', '서버 모델 설정이 필요합니다')
     from testgen.design import build_plan
+    from api.v2.test_generation_runner import _split_batches
     return {'verification_run_id': run.id, 'snapshot_id': run.data['snapshot_id'], 'model_config_version': config.config_version,
             'provider': settings.llm_provider, 'model': settings.llm_model,
             'requirement_count': len(selected), 'condition_count': sum(len(r['conditions']) for r in selected),
-            'subtopic_count': len(groups), 'max_model_calls': len(groups),
+            'subtopic_count': len(groups),
+            # 큰 소주제는 배치로 나눠 부르므로 소주제 수가 아니라 배치 수가 실제 최대 호출 수다.
+            'max_model_calls': sum(len(_split_batches(reqs)) for reqs in groups.values()),
             'design_plan': build_plan(selected),
             'warnings': ['예상 결과는 승인된 명세로 생성하고 코드 예측은 기존 판정에서 따로 계산합니다.',
                          '생성 결과는 검토할 초안입니다. 실제 수행 O/X는 생성하지 않습니다.']}

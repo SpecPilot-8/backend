@@ -357,3 +357,24 @@ def test_export_keeps_design_reasons_and_review_status_separate_from_actual_resu
     assert detail['O2'].value and detail['P2'].value and detail['Q2'].value
     assert detail['R2'].value == '해석 확인 필요'
     assert detail['I2'].value == 'not_run' and detail['J2'].value is None
+
+
+def test_same_generation_input_reuses_validated_responses(generation):
+    _, _, _, _, calls, _ = generation
+    _, first, _ = start(generation)
+    assert first['status'] == 'completed' and first['calls'] == len(calls) and first['reused_calls'] == 0
+    made = len(calls)
+    _, second, spec = start(generation)
+    # 같은 배치 입력은 저장된 응답을 그대로 쓰고 모델을 다시 부르지 않는다.
+    assert second['status'] == 'completed' and len(calls) == made
+    assert second['calls'] == 0 and second['reused_calls'] == made
+    assert spec['generation_status'] == 'completed'
+
+
+def test_split_batches_respects_condition_and_requirement_limits():
+    from api.v2.test_generation_runner import _split_batches
+    reqs = [{'conditions': [{}] * 4} for _ in range(13)]
+    batches = _split_batches(reqs)
+    assert [len(b) for b in batches] == [6, 6, 1]
+    assert all(sum(len(r['conditions']) for r in b) <= 25 for b in batches)
+    assert _split_batches([{'conditions': [{}] * 30}]) == [[{'conditions': [{}] * 30}]]
