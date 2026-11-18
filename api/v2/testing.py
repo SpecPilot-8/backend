@@ -675,3 +675,53 @@ def save_review(p: str, tc: str, body: SaveReview, db: DB):
     result = review_for_case(db, p, {'id': tc, **case.data})
     remember(db, p, scope, body.client_review_id, request, result)
     return result
+
+
+def retest_report(db, p, spec, revision=None, verification_run_id=None):
+    """사양서 작성 이후 요구사항 개정이나 새 검증 판정 변화로 다시 시험해야 하는 시험을 계산한다.
+
+    시험 데이터는 바꾸지 않는다. 조회할 때마다 현재 요구사항과 최신 검증 실행을 기준으로 다시 판단한다.
+    """
+    from api.v2.verification import _run_states
+    fixed = historical(db, spec, revision)
+    base_run = resource(db, p, fixed['verification_run_id'], 'verification_run')
+    if verification_run_id:
+        new_run = resource(db, p, verification_run_id, 'verification_run')
+    else:
+        done = [r for r in all_resources(db, p, 'verification_run')
+                if r.data['status'] == 'completed' and r.created_at > base_run.created_at]
+        new_run = max(done, key=lambda r: r.created_at) if done else None
+    before = after = {}
+    if new_run is not None:
+        _, before = _run_states(base_run)
+        _, after = _run_states(new_run)
+    cond_key = {c['id']: (r['stable_key'], c['stable_key']) for r in fixed['requirements'] for c in r['conditions']}
+    current_revision = {}
+    items = []
+    for case in current_cases(db, p, spec, revision):
+        reasons = []
+        for link in case['requirement_links']:
+            r = link['requirement_id']
+            if r not in current_revision:
+                current_revision[r] = resource(db, p, r, 'requirement').data['revision']
+            if current_revision[r] > link['requirement_revision']:
+                reasons.append({'kind': 'requirement_revised', 'requirement_id': r,
+                                'before_revision': link['requirement_revision'], 'after_revision': current_revision[r]})
+            for c in link['condition_ids']:
+                req_key, key = cond_key.get(c, (None, None))
+                a, b = before.get(key), after.get(key)
+                if new_run is not None and key and a and b and a['status'] != b['status']:
+                    reasons.append({'kind': 'verdict_changed', 'requirement_key': req_key, 'condition_key': key,
+                                    'before_status': a['status'], 'after_status': b['status']})
+        if reasons:
+            items.append({'test_case_id': case['id'], 'test_no': case['test_no'], 'title': case.get('title', ''),
+                          'retest_required': True, 'reasons': reasons})
+    return {'test_specification_id': spec.id, 'base_run_id': base_run.id,
+            'compared_run_id': new_run.id if new_run else None,
+            'retest_count': len(items), 'items': items}
+
+
+@router.get('/test-specifications/{t}/retest')
+def review_retest(p: str, t: str, db: DB, revision: RevisionQuery = None, verification_run_id: str | None = None):
+    # 요구사항 개정·판정 변화에 연결된 시험을 retest_required로 표시한다. verification_run_id가 없으면 최신 완료 실행과 비교한다.
+    return retest_report(db, p, resource(db, p, t, 'test_specification'), revision, verification_run_id)

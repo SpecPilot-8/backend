@@ -286,6 +286,8 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
 
 2026-11-18 추가: `GET /verification-runs/{v}/compare?base={이전 실행 id}`는 두 검증 실행의 판정을 요구사항·조건 `stable_key` 기준으로 맞춰 비교한다. 각 항목은 `change`(added/removed/changed)와 `before_status`, `after_status`를 가지며, `summary`에 상태가 바뀐 조건 수, 개선(→implemented), 퇴행(implemented→) 건수를 준다. 코드 수정 전후 실행을 비교하는 용도이며 LLM을 호출하지 않는다.
 
+2026-11-18 추가: `GET /test-specifications/{t}/retest?verification_run_id=`는 다시 시험해야 하는 시험을 돌려준다. 사유는 두 가지다. `requirement_revised`는 시험이 연결된 요구사항 개정보다 현재 요구사항이 새로울 때, `verdict_changed`는 사양서의 기준 검증 실행과 비교 실행 사이에 연결 조건의 판정이 바뀌었을 때다. 비교 실행을 지정하지 않으면 기준 실행 이후 가장 최근에 완료된 실행을 쓴다. 시험 데이터는 바꾸지 않고 조회할 때마다 계산한다.
+
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
 | POST | `/projects/{p}/test-specifications/generate` | `{verification_run_id,requirement_ids}` → 202 Job |
