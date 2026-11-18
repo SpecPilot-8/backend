@@ -21,7 +21,7 @@ from adapters.v2_testgen import build_test_generation
 from api.errors import APIError
 from api.v2.cost import estimate_cost_usd
 from api.v2.common import WORK_LOCK, transition_job
-from api.v2.server_llm import analysis_client, fail
+from api.v2.server_llm import fail, generation_client
 from api.v2.storage import lock_project, project, public, resource
 from api.v2.test_generation_adapter import ingest_test_generation
 from api.v2.verification_runner import ResponseCache, add_usage
@@ -69,6 +69,8 @@ class GenerationClient:
         self.design_items = design_items
         # 같은 배치 입력의 검증 통과 응답을 재사용한다. 중간 실패 후 다시 생성하면 끝난 배치는 호출하지 않는다.
         self.cache, self.calls, self.reused_calls = cache, 0, 0
+        # 작성된 항목과 겹치거나 중복 보고되어 지운 미포함 조건·관점 수. 모델 출력이 흔들렸다는 신호로 경고에 남긴다.
+        self.dropped = {'conditions': 0, 'intents': 0}
 
     def complete_json(self, **kwargs):
         schema = deepcopy(kwargs["schema"])
@@ -143,13 +145,17 @@ class GenerationClient:
         covered = {
             key for s in response.data["scenarios"] for st in s["steps"] for key in st["condition_keys"]
         }
+        # 재사용 시에도 같은 정리 결과와 경고가 나오도록 정리 전 응답을 저장한다.
+        raw = deepcopy(response.data)
         seen_conditions = set()
+        before = len(response.data["uncovered"])
         response.data["uncovered"] = [
             u
             for u in response.data["uncovered"]
             if u["condition_key"] not in covered
             and not (u["condition_key"] in seen_conditions or seen_conditions.add(u["condition_key"]))
         ]
+        self.dropped['conditions'] += before - len(response.data["uncovered"])
         if self.design_items is not None:
             intents = {i['id']: i for i in self.design_items}
             covered_intents = set()
@@ -163,14 +169,16 @@ class GenerationClient:
                         raise APIError(422, 'MODEL_OUTPUT_INVALID', '시험 관점과 단계의 원문 조건 연결이 일치하지 않습니다')
                     covered_intents.update(ids)
             seen_intents = set()
+            before = len(response.data['uncovered_intents'])
             response.data['uncovered_intents'] = [
                 g
                 for g in response.data['uncovered_intents']
                 if g['intent_id'] not in covered_intents
                 and not (g['intent_id'] in seen_intents or seen_intents.add(g['intent_id']))
             ]
+            self.dropped['intents'] += before - len(response.data['uncovered_intents'])
         if cached is None and self.cache:
-            self.cache.put(cache_key, response.data, getattr(self.client, "model", ""))
+            self.cache.put(cache_key, raw, getattr(self.client, "model", ""))
         self.data = response.data
         return response
 
@@ -247,6 +255,13 @@ def generate_draft(run, groups, client, api_key, model, progress, check_cancelle
             output["test_candidates"].extend(part["test_candidates"])
             output["warnings"].extend(part["warnings"])
             output['design_gaps'].extend(part['design_gaps'])
+            if wrapper.dropped['conditions'] or wrapper.dropped['intents']:
+                output["warnings"].append({
+                    "code": "GENERATION_OUTPUT_NORMALIZED",
+                    "message": f"{title}: 작성한 항목과 겹치거나 중복된 미포함 보고를 정리했습니다 "
+                               f"(조건 {wrapper.dropped['conditions']}건, 관점 {wrapper.dropped['intents']}건)",
+                    "block_ids": [],
+                })
             if len(output["test_candidates"]) > 500:
                 raise APIError(413, "GENERATION_LIMIT_EXCEEDED", "생성 시험 수가 500개 한도를 초과했습니다")
             covered = {k for s in generated["scenarios"] for st in s["steps"] for k in st["condition_keys"]}
@@ -309,7 +324,7 @@ def run_generation(database, p, spec_id, config):
                     "running",
                     progress={"stage": "test_generation", "completed": 0, "total": len(groups)},
                 )
-            client = analysis_client(config)
+            client = generation_client(config)
 
             def check_cancelled():
                 with database.session() as db:

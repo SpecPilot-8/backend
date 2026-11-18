@@ -75,6 +75,11 @@ def probe_client(config):
 
 
 def analysis_client(config):
+    return _build_llm_client(config, effort='high', max_tokens=16000, timeout_seconds=120)
+
+
+def generation_client(config):
+    # 시험 생성은 배치 하나의 출력이 1만 5천 토큰을 넘을 수 있어 추출·검증보다 한도를 크게 둔다.
     return _build_llm_client(config, effort='high', max_tokens=32000, timeout_seconds=300)
 
 

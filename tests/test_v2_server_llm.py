@@ -136,3 +136,14 @@ def test_anthropic_probe_limits_and_key_are_fixed_by_server(config, monkeypatch)
     assert captured['api_key'] == KEY and captured['timeout'] == 20 and captured['max_retries'] == 0
     assert captured['base_url'] == 'https://api.anthropic.com'
     assert probe._max_tokens == 256 and probe.effort == 'low'
+
+
+def test_generation_client_has_larger_limits_than_analysis(config, monkeypatch):
+    from llm import anthropic_client
+    captured = []
+    monkeypatch.setattr(anthropic_client.anthropic, 'Anthropic', lambda **kwargs: captured.append(kwargs))
+    analysis = server_llm.analysis_client(replace(config, llm_api_key=KEY))
+    generation = server_llm.generation_client(replace(config, llm_api_key=KEY))
+    # 큰 한도는 시험 생성에만 둔다. 추출·검증은 기존 16000토큰·120초를 유지한다.
+    assert analysis._max_tokens == 16000 and captured[0]['timeout'] == 120
+    assert generation._max_tokens == 32000 and captured[1]['timeout'] == 300
