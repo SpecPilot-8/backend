@@ -26,6 +26,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
+from decomposer.numbers import numeric_issues
 from decomposer.quotes import StrippedText, locate_quotes
 
 ARTIFACT_VERSION = "2.1"
@@ -218,6 +219,9 @@ def build_extraction(artifact: dict, screens: list[dict], requirements: list[dic
                 # 인용을 원문에서 찾지 못한 조건. 지어낸 조건일 수 있어 전체 원문을 출처로 두고 검토에 올린다.
                 quotes = [r["body"]]
                 reasons.append(f"조건 {c['seq']}의 원문 인용을 찾지 못함")
+            # 인용은 원문과 맞아도 조건 문장을 쓰며 숫자·단위·비교 표현이 바뀔 수 있다. 규칙으로 대조해 검토에 올린다.
+            numeric = numeric_issues(c["statement"], quotes)
+            reasons.extend(f"조건 {c['seq']}: {issue}" for issue in numeric)
             conds.append({
                 "stable_key": f"{r['stable_key']}-C{c['seq']}",
                 "text": c["statement"],
@@ -226,7 +230,7 @@ def build_extraction(artifact: dict, screens: list[dict], requirements: list[dic
                 "target": "unknown",
                 "verifiable": c["verifiable"],
                 "source_refs": [{"block_id": block, "quote": q} for q in quotes],
-                "ambiguity": "",
+                "ambiguity": "; ".join(numeric),
                 "related_condition_keys": [],
                 # 값 비교 규칙 엔진은 보류 중이라 만들지 않는다 (CLAUDE.md 원칙 5).
                 "constraint": None,
