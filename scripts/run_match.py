@@ -2,7 +2,7 @@
 # - 작성자: 정래원
 # - 페이지 개요: 요구사항과 청크의 매칭을 실행해 결과를 저장하는 스크립트
 # - 주요 기능:
-#   1) 전체 투입, 화면 범위, 임베딩 검색 세 가지 후보 방식
+#   1) 전체 투입, 화면 범위, 임베딩 검색 세 가지 후보 방식과 매칭 LLM 없는 임베딩 직결
 #   2) 화면별 매칭 호출과 사용량 출력
 
 """요구사항 ↔ 청크 매칭을 실행해 match_* 테이블에 저장한다.
@@ -15,6 +15,7 @@ full_context  레포 청크 전체를 후보로 LLM이 고른다 (기준선). �
 screen_scope  규칙으로 화면 범위를 먼저 좁히고(matcher/scope), 그 안에서 LLM이 고른다.
 retrieval     화면 범위 안에서 요구사항마다 로컬 임베딩(기본 Qwen3-Embedding-0.6B) 상위 K개를 골라 화면 단위로 합친 것만
               후보로 준다 (--top-k, 기본 30). 효과 측정은 scripts/measure_retrieval_cost.py
+retrieval --direct  매칭 LLM을 부르지 않고 요구사항마다 임베딩 상위 K개를 그대로 근거로 저장한다 (비교 실험용)
 """
 
 import argparse
@@ -26,7 +27,7 @@ from llm import get_client
 from matcher.data import connect, latest_snapshot, load_chunks, load_screens
 from matcher.retrieve import EMBEDDING_MODELS, DenseIndex, screen_candidates
 from matcher.scope import ScopeBuilder
-from matcher.select import render_chunks, select_for_screen
+from matcher.select import ScreenSelection, render_chunks, select_for_screen
 from matcher.store import create_run, save_selection
 
 
@@ -55,7 +56,11 @@ def main() -> None:
     ap.add_argument("--top-k", type=int, default=30, help="retrieval: 요구사항마다 고를 청크 수")
     ap.add_argument("--embedding", default="qwen3-0.6b", choices=list(EMBEDDING_MODELS),
                     help="retrieval: 로컬 임베딩 모델 (비교 결과는 scripts/compare_embeddings.py)")
+    ap.add_argument("--direct", action="store_true",
+                    help="retrieval: 매칭 LLM 없이 요구사항마다 상위 K개를 바로 근거로 쓴다")
     args = ap.parse_args()
+    if args.direct and args.method != "retrieval":
+        ap.error("--direct는 retrieval에서만 쓴다")
 
     client = get_client()
     with connect() as conn:
@@ -70,6 +75,8 @@ def main() -> None:
         shared_context = render_chunks(chunks) if args.method == "full_context" else None
 
         params = {"top_k": args.top_k, "embedding": args.embedding} if args.method == "retrieval" else None
+        if args.direct:
+            params["direct"] = True
         run_id = create_run(conn, snapshot_id, args.method, client.model, params)
         conn.commit()
         print(f"run {run_id}: {args.method} / {args.repo_id} / {client.model}")
@@ -84,6 +91,14 @@ def main() -> None:
             else:
                 keep = scopes.scope(sid).all
                 candidates = [c for c in chunks if c.id in keep]
+            if args.direct:
+                # 임베딩 순위를 그대로 근거로 쓴다. LLM 호출이 없으니 사용량도 없다
+                sel = ScreenSelection(sid, len(candidates), picks={
+                    r.id: ranked.get(r.id, [])[:args.top_k] for r in reqs if ranked.get(r.id)})
+                save_selection(conn, run_id, sel)
+                conn.commit()
+                print(f"  {sid}: 직결 근거 {sum(len(v) for v in sel.picks.values())}건")
+                continue
             # 전체 투입만 모든 화면이 같은 목록이라 캐시가 이득이다. 화면별 후보는 프롬프트로 보낸다
             sel = select_for_screen(client, sid, name, reqs, candidates, context=shared_context,
                                     cache_candidates=args.method == "full_context")
