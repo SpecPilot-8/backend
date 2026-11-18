@@ -300,7 +300,7 @@ def test_design_plan_and_rationale_are_pinned_and_review_is_revision_aware(gener
     assert historical == review
 
 
-@pytest.mark.parametrize('mode', ['foreign-intent', 'wrong-condition-intent', 'blank-rationale', 'overlap-intent'])
+@pytest.mark.parametrize('mode', ['foreign-intent', 'wrong-condition-intent', 'blank-rationale'])
 def test_untrustworthy_design_output_never_saves_cases(generation, mode):
     c, p, _, control, *_ = generation
     control.mode = mode
@@ -309,13 +309,16 @@ def test_untrustworthy_design_output_never_saves_cases(generation, mode):
     assert c.get(f'/api/v2/projects/{p}/test-cases?test_specification_id={spec["id"]}').json()['total'] == 0
 
 
-@pytest.mark.parametrize('mode', ['missing-intent', 'review-needed'])
+@pytest.mark.parametrize('mode', ['missing-intent', 'review-needed', 'overlap-intent'])
 def test_missing_and_assumed_views_are_not_reported_as_written(generation, mode):
     c, p, _, control, *_ = generation
     control.mode = mode
     _, job, spec = start(generation)
     assert job['status'] == 'completed'
     review = c.get(f'/api/v2/projects/{p}/test-specifications/{spec["id"]}/design-review').json()
+    if mode == 'overlap-intent':
+        assert review['summary']['intents_missing'] == 0
+        return
     key = 'intents_missing' if mode == 'missing-intent' else 'intents_review_needed'
     assert review['summary'][key] > 0
     if mode == 'missing-intent':

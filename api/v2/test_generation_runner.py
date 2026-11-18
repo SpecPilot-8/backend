@@ -129,15 +129,17 @@ class GenerationClient:
             )
         if self.api_key and self.api_key in json.dumps(response.data):
             raise APIError(502, "LLM_INVALID_RESPONSE", "정상 모델 응답을 확인하지 못했습니다")
-        # 연결된 조건과 미포함 조건 집합이 겹치거나 중복 보고되는 모순을 차단한다.
-        explained = [u["condition_key"] for u in response.data["uncovered"]]
+        # 연결된 조건과 미포함 조건 집합이 겹치거나 중복되면 실제로 작성된 조건 기준으로 미포함 목록을 정리한다.
         covered = {
             key for s in response.data["scenarios"] for st in s["steps"] for key in st["condition_keys"]
         }
-        if len(explained) != len(set(explained)) or covered.intersection(explained):
-            raise APIError(
-                422, "MODEL_OUTPUT_INVALID", "시험 조건의 연결/미포함 설명이 중복되거나 모순됩니다"
-            )
+        seen_conditions = set()
+        response.data["uncovered"] = [
+            u
+            for u in response.data["uncovered"]
+            if u["condition_key"] not in covered
+            and not (u["condition_key"] in seen_conditions or seen_conditions.add(u["condition_key"]))
+        ]
         if self.design_items is not None:
             intents = {i['id']: i for i in self.design_items}
             covered_intents = set()
@@ -150,11 +152,30 @@ class GenerationClient:
                     if not ids or {intents[i]['condition_key'] for i in ids} != set(st['condition_keys']):
                         raise APIError(422, 'MODEL_OUTPUT_INVALID', '시험 관점과 단계의 원문 조건 연결이 일치하지 않습니다')
                     covered_intents.update(ids)
-            gaps = [g['intent_id'] for g in response.data['uncovered_intents']]
-            if len(gaps) != len(set(gaps)) or covered_intents.intersection(gaps):
-                raise APIError(422, 'MODEL_OUTPUT_INVALID', '시험 관점의 작성/미포함 설명이 중복되거나 모순됩니다')
+            seen_intents = set()
+            response.data['uncovered_intents'] = [
+                g
+                for g in response.data['uncovered_intents']
+                if g['intent_id'] not in covered_intents
+                and not (g['intent_id'] in seen_intents or seen_intents.add(g['intent_id']))
+            ]
         self.data = response.data
         return response
+
+
+def _split_batches(requirements, max_reqs=6, max_conditions=15):
+    # 조건이 많은 대형 소주제는 한 번에 생성할 때 토큰 초과나 관점 중복 오류가 나기 쉬워 작은 묶음으로 나눈다.
+    batches, current, cond_count = [], [], 0
+    for req in requirements:
+        req_conds = len(req["conditions"])
+        if current and (len(current) >= max_reqs or cond_count + req_conds > max_conditions):
+            batches.append(current)
+            current, cond_count = [], 0
+        current.append(req)
+        cond_count += req_conds
+    if current:
+        batches.append(current)
+    return batches
 
 
 def generate_draft(run, groups, client, api_key, model, progress, check_cancelled=None):
@@ -168,10 +189,8 @@ def generate_draft(run, groups, client, api_key, model, progress, check_cancelle
     usage, hashes, uncovered = {}, {}, []
     # 소주제별로 독립 프롬프트를 구성하고 입력 지문 해시를 기록해 추후 재현성 검증에 사용한다.
     for done, (sub_id, requirements) in enumerate(groups.items(), 1):
-        if check_cancelled:
-            check_cancelled()
         title = requirements[0].get("subtopic_title") or requirements[0]["title"]
-        spec_reqs = [
+        full_spec_reqs = [
             SpecRequirement(
                 r["stable_key"],
                 r["original_text"] or r["title"],
@@ -181,40 +200,54 @@ def generate_draft(run, groups, client, api_key, model, progress, check_cancelle
             for r in requirements
         ]
         hashes[sub_id] = sha256(
-            json.dumps([PROMPT_VERSION, RULES_VERSION, input_hash(model, title, spec_reqs)]).encode()
+            json.dumps([PROMPT_VERSION, RULES_VERSION, input_hash(model, title, full_spec_reqs)]).encode()
         ).hexdigest()
-        design_items = build_plan(requirements)['items']
-        wrapper = GenerationClient(client, api_key, design_items)
-        try:
-            generated = generate(wrapper, title, spec_reqs, design_items)
-        except APIError as error:
-            add_usage(usage, wrapper.usage)
-            error.details = {**error.details, "usage": dict(usage)}
-            raise
-        add_usage(usage, generated["usage"])
-        # 소주제의 조건만 변환한다. 원문 키가 다른 소주제와 섞이지 않는다.
-        part = build_test_generation({**run, "requirements": requirements}, sub_id, sub_id, generated)
-        output["test_candidates"].extend(part["test_candidates"])
-        output["warnings"].extend(part["warnings"])
-        output['design_gaps'].extend(part['design_gaps'])
-        if len(output["test_candidates"]) > 500:
-            raise APIError(413, "GENERATION_LIMIT_EXCEEDED", "생성 시험 수가 500개 한도를 초과했습니다")
-        covered = {k for s in generated["scenarios"] for st in s["steps"] for k in st["condition_keys"]}
-        explanations = {u["condition_key"]: u["reason"] for u in wrapper.data["uncovered"]}
-        for req in requirements:
-            for condition in req["conditions"]:
-                if condition["stable_key"] not in covered:
-                    uncovered.append(
-                        {
-                            "requirement_id": req["id"],
-                            "requirement_revision": req["revision"],
-                            "condition_id": condition["id"],
-                            "reason": explanations.get(
-                                condition["stable_key"], "생성된 시험에 연결되지 않았습니다"
-                            ),
-                        }
-                    )
-        progress(done, len(groups), usage)
+        batches = _split_batches(requirements)
+        for batch_idx, batch in enumerate(batches, 1):
+            if check_cancelled:
+                check_cancelled()
+            spec_reqs = [
+                SpecRequirement(
+                    r["stable_key"],
+                    r["original_text"] or r["title"],
+                    tuple(r.get("review_reasons", [])),
+                    tuple(deepcopy(r["conditions"])),
+                )
+                for r in batch
+            ]
+            design_items = build_plan(batch)['items']
+            wrapper = GenerationClient(client, api_key, design_items)
+            try:
+                generated = generate(wrapper, title, spec_reqs, design_items)
+            except APIError as error:
+                add_usage(usage, wrapper.usage)
+                error.details = {**error.details, "usage": dict(usage)}
+                raise
+            add_usage(usage, generated["usage"])
+            # 소주제의 조건만 변환한다. 원문 키가 다른 소주제와 섞이지 않는다.
+            batch_key = sub_id if len(batches) == 1 else f"{sub_id}-{batch_idx}"
+            part = build_test_generation({**run, "requirements": batch}, sub_id, batch_key, generated)
+            output["test_candidates"].extend(part["test_candidates"])
+            output["warnings"].extend(part["warnings"])
+            output['design_gaps'].extend(part['design_gaps'])
+            if len(output["test_candidates"]) > 500:
+                raise APIError(413, "GENERATION_LIMIT_EXCEEDED", "생성 시험 수가 500개 한도를 초과했습니다")
+            covered = {k for s in generated["scenarios"] for st in s["steps"] for k in st["condition_keys"]}
+            explanations = {u["condition_key"]: u["reason"] for u in wrapper.data["uncovered"]}
+            for req in batch:
+                for condition in req["conditions"]:
+                    if condition["stable_key"] not in covered:
+                        uncovered.append(
+                            {
+                                "requirement_id": req["id"],
+                                "requirement_revision": req["revision"],
+                                "condition_id": condition["id"],
+                                "reason": explanations.get(
+                                    condition["stable_key"], "생성된 시험에 연결되지 않았습니다"
+                                ),
+                            }
+                        )
+            progress(done if batch_idx == len(batches) else done - 1, len(groups), usage)
     if not output["test_candidates"]:
         output["warnings"].append(
             {
