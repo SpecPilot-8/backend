@@ -75,7 +75,7 @@ def probe_client(config):
 
 
 def analysis_client(config):
-    return _build_llm_client(config, effort='high', max_tokens=16000, timeout_seconds=120)
+    return _build_llm_client(config, effort='high', max_tokens=32000, timeout_seconds=300)
 
 
 def fail(error):
