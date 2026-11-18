@@ -284,6 +284,8 @@ ZIP은 경로 탈출·심볼릭 링크·압축 폭탄을 거부한다. 해제 �
 
 2026-11-18 추가: `GET /test-specifications/{t}/quality?revision=n`은 LLM 호출 없이 규칙으로 사양서 품질을 점검한다. 응답은 `summary`(시험·단계 수, 경계값 누락, 중복, 기획서에 없는 문구, 다른 요구사항 문구 건수)와 항목별 목록 `boundary`, `duplicates`, `invented`, `borrowed`다. `include_analysis_detail=true`로 내보내면 Excel에 `품질 점검` 시트가 추가된다. 추출·시험 생성 작업은 완료 시 `duration_ms`와 `estimated_cost_usd`를, 검증 작업은 `analysis_metrics.estimated_cost_usd`와 단계별 `estimated_cost_usd`를 기록한다. 단가를 확인하지 않은 모델은 `null`이다.
 
+2026-11-18 추가: `GET /verification-runs/{v}/compare?base={이전 실행 id}`는 두 검증 실행의 판정을 요구사항·조건 `stable_key` 기준으로 맞춰 비교한다. 각 항목은 `change`(added/removed/changed)와 `before_status`, `after_status`를 가지며, `summary`에 상태가 바뀐 조건 수, 개선(→implemented), 퇴행(implemented→) 건수를 준다. 코드 수정 전후 실행을 비교하는 용도이며 LLM을 호출하지 않는다.
+
 | 메서드 | 경로 | 입력 → 결과 |
 |---|---|---|
 | POST | `/projects/{p}/test-specifications/generate` | `{verification_run_id,requirement_ids}` → 202 Job |
