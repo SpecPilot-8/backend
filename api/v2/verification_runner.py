@@ -141,7 +141,7 @@ RETRIEVAL_OUTSIDE_K = 5   # 다른 화면 코드만 있는 경우를 가리려�
 
 
 def load_retriever():
-    """SPECPILOT_MATCH_STRATEGY=retrieval일 때 청크 목록으로 로컬 임베딩 색인을 만드는 함수를 돌려준다.
+    """기본 매칭 방식(retrieval)일 때 청크 목록으로 로컬 임베딩 색인을 만드는 함수를 돌려준다.
 
     임베딩 라이브러리·모델이 없으면 ImportError/OSError가 나고, 호출한 쪽은 전체 투입으로 돌아간다.
     """
@@ -344,7 +344,8 @@ def run_verification(database, p, run_id, config):
             with TemporaryDirectory(prefix='specpilot-verify-') as folder:
                 cache = None if os.environ.get('SPECPILOT_DISABLE_RESPONSE_CACHE') == '1' else ResponseCache(database, p)
                 retriever = None
-                if os.environ.get('SPECPILOT_MATCH_STRATEGY') == 'retrieval':
+                # 기본은 검색 후 선별(retrieval). 전체 청크를 넣으려면 SPECPILOT_MATCH_STRATEGY=all_chunks.
+                if os.environ.get('SPECPILOT_MATCH_STRATEGY', 'retrieval') == 'retrieval':
                     try:
                         retriever = load_retriever()
                     except ImportError:

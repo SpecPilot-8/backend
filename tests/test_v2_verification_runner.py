@@ -508,3 +508,11 @@ def test_retrieval_falls_back_to_all_chunks_when_model_is_missing(linked, monkey
     assert job["status"] == "completed"
     assert job["analysis_metrics"]["strategy"] == "all_chunks"
     assert job["analysis_metrics"]["retrieval_fallback"] == "ImportError"
+
+
+def test_retrieval_is_default_and_all_chunks_is_opt_out(linked, monkeypatch):
+    from api.v2 import verification_runner
+    monkeypatch.delenv("SPECPILOT_MATCH_STRATEGY")
+    monkeypatch.setattr(verification_runner, "load_retriever", lambda: _FakeIndex)
+    _, job = execute(linked)
+    assert job["status"] == "completed" and job["analysis_metrics"]["strategy"] == "retrieval"

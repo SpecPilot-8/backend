@@ -5,6 +5,13 @@ from api.config import Settings
 from api.main import create_app
 
 
+@pytest.fixture(autouse=True)
+def _all_chunks_matching(monkeypatch):
+    # 웹 검증 기본값은 임베딩 검색이다. 테스트마다 실제 임베딩 모델을 올리지 않도록 전체 투입으로 둔다.
+    # 검색 경로를 보는 테스트는 직접 retrieval로 바꾸고 가짜 색인을 넣는다.
+    monkeypatch.setenv("SPECPILOT_MATCH_STRATEGY", "all_chunks")
+
+
 @pytest.fixture
 def config(tmp_path):
     root = tmp_path / "workspace"
