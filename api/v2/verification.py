@@ -6,9 +6,9 @@
 #   - 검증 실행 목록, 요구사항별 추적표, 상태 요약 및 코드 근거 상세 제공
 
 from copy import deepcopy
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request
 from pydantic import Field
-from typing import Literal
+from typing import Annotated, Literal
 from api.errors import APIError
 from api.v2.common import DB, Config, Input, Limit, Offset, QUEUE_LOCK, job_out, make_job, missing
 from api.v2.storage import all_resources, create, page, project, public, resource
@@ -224,3 +224,12 @@ def compare(p: str, v: str, base: str, db: DB):
         'requirements': requirements,
         'conditions': conditions,
     }
+
+
+@router.get('/{v}/impact')
+def impact(p: str, v: str, db: DB, snapshot_id: str | None = None,
+           file: Annotated[list[str] | None, Query(max_length=200)] = None):
+    # 코드가 바뀌면 이 검증 실행의 어느 화면·요구사항·시험을 다시 봐야 하는지 정적 호출 그래프로 찾는다.
+    # snapshot_id를 주면 두 스냅샷의 파일을 비교하고, file을 주면 그 파일을 고친다고 가정한다.
+    from api.v2.impact import impact_report
+    return impact_report(db, p, resource(db, p, v, 'verification_run'), snapshot_id, file)
