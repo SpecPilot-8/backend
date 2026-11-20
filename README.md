@@ -42,7 +42,7 @@ v2의 `api_v2_*` 테이블은 기존 v1/CLI 테이블과 분리한다. 앱 시�
 |---|---|---|
 | `SPECPILOT_LLM_PROVIDER` / `SPECPILOT_LLM_MODEL` | `anthropic` / `claude-opus-5` | 서버가 쓰는 모델 |
 | `SPECPILOT_LLM_EFFORT` | `high` | Anthropic 사고량. 낮추면 싸지만 결함을 더 놓친다 ([docs/effort-eval.md](docs/effort-eval.md)) |
-| `SPECPILOT_MATCH_STRATEGY` | 전체 투입 | `retrieval`이면 웹 검증 매칭 후보를 로컬 임베딩 검색으로 줄인다 ([docs/retrieval-eval.md](docs/retrieval-eval.md)) |
+| `SPECPILOT_MATCH_STRATEGY` | `retrieval` | 웹 검증 매칭 후보를 로컬 임베딩 검색으로 줄인다. `all_chunks`면 전체 청크를 넣는다. 임베딩 라이브러리·모델이 없으면 전체 투입으로 돌아가고 `retrieval_fallback`을 기록한다 ([docs/retrieval-eval.md](docs/retrieval-eval.md)) |
 | `SPECPILOT_EMBEDDING_MODEL` | `qwen3-0.6b` | 검색용 로컬 임베딩 모델 (`sentence-transformers` 필요, 없으면 전체 투입) |
 | `SPECPILOT_DISABLE_RESPONSE_CACHE` | 켜짐 | `1`이면 같은 입력의 응답 재사용을 끈다 ([docs/response-cache.md](docs/response-cache.md)) |
 | `SPECPILOT_DSN` | `dbname=specpilot` | CLI 파이프라인 DB. 다른 샘플은 DB를 나눠 쓴다 |

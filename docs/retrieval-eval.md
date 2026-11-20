@@ -146,7 +146,7 @@ Anthropic 클라이언트는 `context`로 받은 블록에 항상 `cache_control
 
 ## 웹 코드 검증 연결 (2026-11-16)
 
-`SPECPILOT_MATCH_STRATEGY=retrieval`이면 웹 검증(`api/v2/verification_runner.py`)도 화면마다 후보를 줄여 매칭한다.
+웹 검증(`api/v2/verification_runner.py`)은 화면마다 후보를 줄여 매칭한다. 11/20부터 기본값이며, `SPECPILOT_MATCH_STRATEGY=all_chunks`로 전체 투입을 쓸 수 있다.
 기본값은 지금과 같은 전체 투입이다.
 
 - 후보 = 요구사항마다 화면 범위 안 상위 30개 + 화면 밖 상위 5개의 합집합. 화면 밖 후보를 조금 남겨 두는 이유는
