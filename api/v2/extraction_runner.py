@@ -6,6 +6,7 @@
 #   - 원문 블록 매핑, 작업 진행 상태 갱신 및 취소/설정 변경 시 결과 차단 처리
 
 """웹 문서의 고정 원문 → 기존 조건 분해기 → 검증된 v2 초안. PostgreSQL 불필요."""
+import os
 from copy import deepcopy
 from time import perf_counter
 
@@ -19,7 +20,9 @@ from api.v2.common import WORK_LOCK, transition_job
 from api.v2.document_contracts import validate_extraction
 from api.v2.server_llm import analysis_client, fail
 from api.v2.storage import all_resources, lock_project, project, resource
+from api.v2.verification_runner import ResponseCache
 from decomposer.decompose import decompose_screen
+from llm.base import LLMResponse
 from matcher.data import Requirement
 CATEGORIES = ['display', 'validation', 'navigation', 'business_logic', 'data', 'error_message']
 PROMPT_VERSION = 'decompose-v3-web-category-1'
@@ -33,8 +36,15 @@ data: 저장·수정·삭제·파일 처리. error_message: 로그인 실패·�
 
 
 class CategorizedClient:
-    def __init__(self, client):
-        self.client, self.categories = client, {}
+    """분해 호출에 분류 스키마를 덧붙이고, 같은 입력의 응답은 저장해 둔 것을 재사용한다.
+
+    응답은 바로 저장하지 않고 pending에 둔다. 화면 단위의 인용·누락 검증까지 통과한 뒤에
+    extract_draft가 저장한다. 검증에 실패한 응답을 저장하면 다시 실행해도 같은 실패가 반복된다.
+    """
+    def __init__(self, client, cache=None):
+        self.client, self.categories, self.cache = client, {}, cache
+        self.calls = self.reused_calls = 0
+        self.pending = None
 
     def complete_json(self, **kwargs):
         schema = deepcopy(kwargs['schema'])
@@ -45,10 +55,17 @@ class CategorizedClient:
         for name in ['statement', 'verifiable_reason']:
             condition['properties'][name]['minLength'] = 1
         condition['properties']['source_quotes']['minItems'] = 1
-        result = self.client.complete_json(**{**kwargs, 'schema': schema,
-            'instructions': kwargs['instructions'] + CATEGORY_INSTRUCTIONS})
-        if result.error:
-            fail(result.error)
+        request = {**kwargs, 'schema': schema, 'instructions': kwargs['instructions'] + CATEGORY_INSTRUCTIONS}
+        cache_key = self.cache.key(self.client, request) if self.cache else None
+        cached = self.cache.get(cache_key) if self.cache else None
+        if cached is not None:
+            self.reused_calls += 1
+            result = LLMResponse(cached, '', getattr(self.client, 'model', ''), {})
+        else:
+            self.calls += 1
+            result = self.client.complete_json(**request)
+            if result.error:
+                fail(result.error)
         if not Draft202012Validator(schema).is_valid(result.data):
             raise APIError(422, 'MODEL_OUTPUT_INVALID', '조건 분해 출력의 구조·범주를 확인하세요')
         items = result.data['requirements']
@@ -60,6 +77,8 @@ class CategorizedClient:
                 raise APIError(422, 'MODEL_OUTPUT_INVALID', '요구사항별 조건 개수가 유효하지 않습니다')
             for seq, c in enumerate(item['conditions'], 1):
                 self.categories[item['requirement_key'], seq] = c['category']
+        if cached is None and self.cache:
+            self.pending = (cache_key, deepcopy(result.data), getattr(self.client, 'model', ''))
         return result
 
 
@@ -119,7 +138,7 @@ def remap_sources(value, mapping):
                 remap_sources(child, mapping)
 
 
-def extract_draft(document_id, doc, client, progress, check_cancelled=None):
+def extract_draft(document_id, doc, client, progress, check_cancelled=None, cache=None, stats=None):
     screens, reqs, mapping = prepare_document(doc)
     conditions, usage = [], {'input_tokens': 0, 'output_tokens': 0}
     # 화면 단위로 분해기를 호출하며 각 단계 직전 취소·설정 변경 여부를 확인해 불필요한 LLM 과금을 막는다.
@@ -127,7 +146,7 @@ def extract_draft(document_id, doc, client, progress, check_cancelled=None):
         if check_cancelled:
             check_cancelled()
         selected = [r for r in reqs if r['screen_id'] == s['screen_id']]
-        wrapped = CategorizedClient(client)
+        wrapped = CategorizedClient(client, cache)
         out = decompose_screen(wrapped, s['screen_id'], s['screen_name'], [Requirement(r['id'], r['stable_key'], r['screen_id'], r['body']) for r in selected])
         if set(out.conditions) != {r['id'] for r in selected} or any(code in ('omitted', 'unknown_requirement') for code, _, _ in out.issues):
             raise APIError(422, 'MODEL_OUTPUT_INVALID', '모델이 원문 요구사항을 누락하거나 알 수 없는 요구사항을 반환했습니다')
@@ -140,6 +159,12 @@ def extract_draft(document_id, doc, client, progress, check_cancelled=None):
                                    'category': wrapped.categories[r['stable_key'], seq]})
             if any(rid == r['id'] and code == 'uncovered_text' for code, rid, _ in out.issues):
                 s['review_reasons'].append(f"{r['seq_label']}번 원문에 조건으로 연결되지 않은 구절이 있습니다")
+        # 화면의 모든 검증을 통과했으므로 이제 응답을 저장한다. 중간에 실패해 다시 실행하면 끝난 화면은 비용 없이 넘어간다.
+        if wrapped.pending:
+            cache.put(*wrapped.pending)
+        if stats is not None:
+            stats['calls'] = stats.get('calls', 0) + wrapped.calls
+            stats['reused_calls'] = stats.get('reused_calls', 0) + wrapped.reused_calls
         for key in usage:
             amount = out.usage.get(key, 0)
             if isinstance(amount, int) and not isinstance(amount, bool) and amount >= 0:
@@ -201,7 +226,10 @@ def run_extraction(database, p, d, job_id, config):
                     transition_job(db, job, 'running', progress={'stage': 'condition_extraction', 'completed': done, 'total': total})
 
             started = perf_counter()
-            draft, usage = extract_draft(d, document, client, on_progress, check_cancelled=check_cancelled)
+            cache = None if os.environ.get('SPECPILOT_DISABLE_RESPONSE_CACHE') == '1' else ResponseCache(database, p)
+            stats = {}
+            draft, usage = extract_draft(d, document, client, on_progress, check_cancelled=check_cancelled,
+                                         cache=cache, stats=stats)
             duration_ms = round((perf_counter() - started) * 1000)
             from api.v2.documents import ingest_extraction
             # 저장 직전 취소 여부와 모델·문서 버전·동시 수동 추가 여부를 재검증한 뒤 요구사항을 커밋한다.
@@ -217,7 +245,8 @@ def run_extraction(database, p, d, job_id, config):
                 ids = ingest_extraction(db, p, d, draft)
                 transition_job(db, job, 'completed', result_ref={'kind': 'document', 'id': d},
                        result={'requirement_count': len(ids), 'condition_count': sum(len(r['conditions']) for r in draft['requirements'])},
-                       usage=usage, duration_ms=duration_ms,
+                       usage=usage, duration_ms=duration_ms, calls=stats.get('calls', 0),
+                       reused_calls=stats.get('reused_calls', 0),
                        estimated_cost_usd=estimate_cost_usd(usage, config.llm_model), missing_features=[])
         except APIError as error:
             if error.code == 'JOB_CANCELLED':

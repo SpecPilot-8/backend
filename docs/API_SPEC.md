@@ -604,7 +604,7 @@ SSE 이벤트: `id`(순차 이벤트 번호), `event`(progress/result/completed/
 
 작업 조회/SSE는 queued → running(완료 화면/전체 화면) → completed 또는 failed를 반환한다. job에는 document_id, provider/model/config_version 스냅샷, prompt_version, result.requirement_count/condition_count, 안전한 error.code/message 및 토큰 사용량을 기록한다. 원문과 키는 이벤트에 넣지 않는다. 브라우저 재열기 후 같은 작업을 조회할 수 있다. 실패 결과는 채택하지 않고 검토를 자동 승인하지 않는다.
 
-이미 저장된 요구사항은 덮어쓰지 않으며 문서별 중복 실행은 409로 거부한다. 원문에 없는 인용·누락 요구사항·잘못된 범주·버전 변경은 failed로 남긴다. 원문 중 조건에 연결되지 않은 구절은 review_reasons에 남긴다. 인용이 원문과 맞더라도 조건 문장의 숫자·단위·비교 표현(이하·이상·초과·미만)이 인용과 다르면 해당 조건의 ambiguity와 요구사항 review_reasons에 사유를 남겨 needs_review로 저장한다(11/19, `decomposer/numbers.py`). 조건 문장은 고치지 않는다. 새 초안과 completed 작업은 같은 DB 트랜잭션으로 저장한다.
+이미 저장된 요구사항은 덮어쓰지 않으며 문서별 중복 실행은 409로 거부한다. 원문에 없는 인용·누락 요구사항·잘못된 범주·버전 변경은 failed로 남긴다. 원문 중 조건에 연결되지 않은 구절은 review_reasons에 남긴다. 추출 작업도 같은 입력의 모델 응답을 재사용하며, 완료 작업에 `calls`·`reused_calls`를 기록한다(11/20). 화면 단위 검증을 통과한 응답만 저장한다. 인용이 원문과 맞더라도 조건 문장의 숫자·단위·비교 표현(이하·이상·초과·미만)이 인용과 다르면 해당 조건의 ambiguity와 요구사항 review_reasons에 사유를 남겨 needs_review로 저장한다(11/19, `decomposer/numbers.py`). 조건 문장은 고치지 않는다. 새 초안과 completed 작업은 같은 DB 트랜잭션으로 저장한다.
 
 개발 서버 한 프로세스에서 직렬 백그라운드 실행한다. 서버 재시작 시 중단 작업은 failed/SERVER_RESTARTED로 기록하고 유료 요청을 자동 재호출하지 않는다. 내구성 큐·다중 프로세스 워커·취소/선택 재시도는 #52의 후속 범위다. 한 번에 최대 100화면/2000요구사항 원문/300000자, 화면당 출력 16000토큰·요청 시간 제한 120초·자동 재시도 없음이다. 일반 문단 PDF와 스캔 본문 전체 OCR은 이 실행 경로가 지원하지 않으며 원문 검토·수동 등록이 필요하다.
 
