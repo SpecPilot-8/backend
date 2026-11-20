@@ -25,7 +25,8 @@ EXTENSIONS = {'.java', '.js', '.jsx', '.html', '.htm', '.css', '.json', '.yaml',
 IGNORED = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', 'target', 'build', 'dist', '__MACOSX', '.AppleDouble'}
 _PARSER_LOCK = Lock()
 TEXT_CHUNK_MAX_BYTES = 8 * 1024
-CHUNKING_VERSION = f'text-utf8-v1:{TEXT_CHUNK_MAX_BYTES}'
+# ast-split-v1: 구조 파서가 만든 청크도 8KiB를 넘으면 문장 경계에서 나눈다. 8KiB 이하 청크는 그대로다.
+CHUNKING_VERSION = f'text-utf8-v1:{TEXT_CHUNK_MAX_BYTES}/ast-split-v1'
 
 
 def supported_source(path):
@@ -163,8 +164,12 @@ def chunk_file(path, text):
         with _PARSER_LOCK:
             chunks = parser(path, text)
     if chunks:
-        return [{'file_path': path, 'start_line': c.start_line, 'end_line': c.end_line,
-                 'symbol': c.symbol_fqn, 'content': c.content, 'chunk_type': c.chunk_type} for c in chunks]
+        out = []
+        for c in chunks:
+            item = {'file_path': path, 'start_line': c.start_line, 'end_line': c.end_line,
+                    'symbol': c.symbol_fqn, 'content': c.content, 'chunk_type': c.chunk_type}
+            out.extend(split_large(item))
+        return out
     return list(text_chunks(path, text))
 
 
@@ -189,6 +194,48 @@ def reusable_chunks(db, p, file_hashes):
         if item.data['snapshot_id'] == base.id and item.data['file_path'] in same:
             out[item.data['file_path']].append({k: v for k, v in item.data.items() if k != 'snapshot_id'})
     return base.id, {path: chunks for path, chunks in out.items() if chunks}
+
+
+def _indent(line):
+    return len(line) - len(line.lstrip(' \t'))
+
+
+def split_large(item, limit=TEXT_CHUNK_MAX_BYTES):
+    """8KiB를 넘는 구조 청크(큰 메서드·컴포넌트)를 문장 경계에서 나눈다. 넘지 않으면 그대로 돌려준다.
+
+    자르는 자리는 본문 첫 줄과 들여쓰기가 같거나 얕은 줄의 앞이다. 함수 본문의 최상위 문장이나
+    분기(if, return, JSX 블록) 시작에 해당한다. 그런 자리가 없으면 줄 경계에서 자른다.
+    조각은 같은 심볼·종류를 유지해 호출 그래프에서 같은 정의로 묶이고, part로 순서를 남긴다.
+    """
+    if len(item['content'].encode('utf-8')) <= limit:
+        return [item]
+    lines = item['content'].splitlines(keepends=True)
+    body = next((_indent(l) for l in lines[1:] if l.strip()), 0)
+    parts, start, size, cut = [], 0, 0, None
+    for i, line in enumerate(lines):
+        n = len(line.encode('utf-8'))
+        if size + n > limit and i > start:
+            end = cut if cut and cut > start else i
+            parts.append((start, end))
+            start, size, cut = end, sum(len(l.encode('utf-8')) for l in lines[end:i]), None
+        if i > start and line.strip() and _indent(line) <= body:
+            cut = i
+        size += n
+    parts.append((start, len(lines)))
+    out = []
+    for a, b in parts:
+        content = ''.join(lines[a:b])
+        first = item['start_line'] + a
+        if len(content.encode('utf-8')) > limit:
+            # 한 줄이 8KiB를 넘는 경우(압축된 코드 등)만 바이트 단위로 자른다.
+            for piece in text_chunks(item['file_path'], content):
+                out.append({**item, 'content': piece['content'], 'start_line': first + piece['start_line'] - 1,
+                            'end_line': first + piece['end_line'] - 1})
+        else:
+            out.append({**item, 'content': content, 'start_line': first, 'end_line': item['start_line'] + b - 1})
+    for index, part in enumerate(out, 1):
+        part['part'] = {'index': index, 'total': len(out)}
+    return out
 
 
 @router.post('/sources', status_code=201)
