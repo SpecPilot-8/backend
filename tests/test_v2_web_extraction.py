@@ -153,3 +153,38 @@ def test_missing_header_prevents_model_guessing():
     with pytest.raises(APIError) as e:
         runner.prepare_document(doc)
     assert e.value.code == 'SCREEN_HEADER_REQUIRED'
+
+
+class MemoryCache:
+    key = staticmethod(runner.ResponseCache.key)
+
+    def __init__(self):
+        self.store = {}
+
+    def get(self, key):
+        return deepcopy(self.store.get(key))
+
+    def put(self, key, data, model):
+        self.store[key] = deepcopy(data)
+
+
+def test_rerun_reuses_validated_screen_response_without_model_call():
+    calls = []
+    client = SimpleNamespace(model='test-model', complete_json=lambda **kwargs: calls.append(1) or
+                             LLMResponse(good_response(), '', 'test-model', {'input_tokens': 20, 'output_tokens': 10}))
+    cache, first, second = MemoryCache(), {}, {}
+    draft1, usage1 = runner.extract_draft('doc', sample_document(), client, lambda *a: None, cache=cache, stats=first)
+    draft2, usage2 = runner.extract_draft('doc', sample_document(), client, lambda *a: None, cache=cache, stats=second)
+    assert len(calls) == 1 and first == {'calls': 1, 'reused_calls': 0} and second == {'calls': 0, 'reused_calls': 1}
+    assert usage2 == {'input_tokens': 0, 'output_tokens': 0} and usage1['input_tokens'] == 20
+    assert draft1['requirements'] == draft2['requirements']
+
+
+def test_response_failing_quote_check_is_not_stored():
+    bad = good_response()
+    bad['requirements'][0]['conditions'][0]['source_quotes'] = ['원문에 없는 문장']
+    client = SimpleNamespace(model='test-model', complete_json=lambda **kwargs: LLMResponse(bad, '', 'test-model'))
+    cache = MemoryCache()
+    with pytest.raises(APIError):
+        runner.extract_draft('doc', sample_document(), client, lambda *a: None, cache=cache)
+    assert cache.store == {}
