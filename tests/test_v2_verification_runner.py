@@ -90,7 +90,7 @@ def linked(config, monkeypatch):
         return LLMResponse(data, "", "test-model", usage)
 
     monkeypatch.setattr(
-        verification_runner, "analysis_client", lambda _: SimpleNamespace(complete_json=complete)
+        verification_runner, "analysis_client", lambda *_: SimpleNamespace(complete_json=complete)
     )
     with TestClient(create_app(config)) as c:
         p = c.post("/api/v2/projects", json={"name": "실행 연결"}).json()["id"]

@@ -13,6 +13,7 @@ import re
 import anthropic
 from jsonschema import Draft202012Validator
 
+from api.config import STAGES
 from api.errors import APIError
 from api.v2.common import now
 from api.v2.storage import all_resources
@@ -33,15 +34,17 @@ ERRORS = {
 
 def server_profile(config):
     supported = config.llm_provider in ('anthropic', 'vercel')
-    model_valid = bool(re.fullmatch(r'[A-Za-z0-9._:/-]{1,200}', config.llm_model))
+    models = {config.llm_model, *dict(config.stage_models).values()}
+    model_valid = all(re.fullmatch(r'[A-Za-z0-9._:/-]{1,200}', m) for m in models)
     # Vercel Gateway는 provider/model 형식 식별자가 필수다.
     if config.llm_provider == 'vercel':
-        model_valid = model_valid and '/' in config.llm_model
+        model_valid = model_valid and all('/' in m for m in models)
     key_valid = bool(config.llm_api_key and config.llm_api_key.isascii()
                      and not any(c.isspace() for c in config.llm_api_key))
     enabled = bool(supported and model_valid and key_valid)
     return {'id': 'primary', 'provider': config.llm_provider, 'model': config.llm_model,
             'display_name': f'{config.llm_model} (서버 설정)', 'adapter_status': 'configured' if enabled else 'not_configured',
+            'stage_models': {stage: config.model_for(stage) for stage in STAGES},
             'enabled': enabled, 'capabilities': ['connection_check', 'requirement_extraction', 'implementation_judgment', 'call_flow', 'test_case_generation'],
             'credential_required': False, 'credential_source': 'server_env', 'credential_configured': key_valid,
             'limitations': ['confirmed_screen_entries_required', 'static_scope_only', 'generated_tests_require_review']}
@@ -49,7 +52,8 @@ def server_profile(config):
 
 def settings_fingerprint(config):
     # 서버 재시작 후 제공자·모델·API 키가 바뀌면 기존 연결 확인 결과를 자동 무효화하기 위한 지문이다.
-    return sha256(json.dumps([config.llm_provider, config.llm_model, config.llm_api_key]).encode()).hexdigest()
+    return sha256(json.dumps([config.llm_provider, config.llm_model, config.llm_api_key,
+                              list(config.stage_models)]).encode()).hexdigest()
 
 
 def connection_state(db, p, version, config):
@@ -58,15 +62,15 @@ def connection_state(db, p, version, config):
     return 'connected' if server_profile(config)['enabled'] and matches and matches[-1].data['status'] == 'connected' else 'not_connected'
 
 
-def _build_llm_client(config, *, effort: str, max_tokens: int, timeout_seconds: int):
+def _build_llm_client(config, *, effort: str, max_tokens: int, timeout_seconds: int, model: str | None = None):
     # 연결 점검과 실제 분석 작업이 동일 제공자 분기 및 타임아웃 규격을 공유하도록 통합 생성한다.
     if config.llm_provider == 'anthropic':
         from llm.anthropic_client import AnthropicClient
-        return AnthropicClient(model=config.llm_model, effort=effort, api_key=config.llm_api_key,
+        return AnthropicClient(model=model or config.llm_model, effort=effort, api_key=config.llm_api_key,
                                max_tokens=max_tokens, timeout_seconds=timeout_seconds,
                                max_retries=0, base_url='https://api.anthropic.com')
     from llm.vercel_client import VercelClient
-    return VercelClient(api_key=config.llm_api_key, model=config.llm_model,
+    return VercelClient(api_key=config.llm_api_key, model=model or config.llm_model,
                         max_tokens=max_tokens, timeout_seconds=timeout_seconds)
 
 
@@ -74,13 +78,16 @@ def probe_client(config):
     return _build_llm_client(config, effort='low', max_tokens=256, timeout_seconds=20)
 
 
-def analysis_client(config):
-    return _build_llm_client(config, effort='high', max_tokens=16000, timeout_seconds=120)
+def analysis_client(config, stage=None):
+    # stage를 주면 SPECPILOT_LLM_MODEL_<STAGE>로 지정한 모델을 쓴다 (없으면 기본 모델).
+    return _build_llm_client(config, effort='high', max_tokens=16000, timeout_seconds=120,
+                             model=config.model_for(stage))
 
 
 def generation_client(config):
     # 시험 생성은 배치 하나의 출력이 1만 5천 토큰을 넘을 수 있어 추출·검증보다 한도를 크게 둔다.
-    return _build_llm_client(config, effort='high', max_tokens=32000, timeout_seconds=300)
+    return _build_llm_client(config, effort='high', max_tokens=32000, timeout_seconds=300,
+                             model=config.model_for('generation'))
 
 
 def fail(error):

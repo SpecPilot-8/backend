@@ -363,7 +363,7 @@ def run_generation(database, p, spec_id, config):
                 cache=cache, stats=stats,
             )
             duration_ms = round((perf_counter() - started) * 1000)
-            cost = estimate_cost_usd(usage, config.llm_model)
+            cost = estimate_cost_usd(usage, config.model_for('generation'))
             with database.session() as db:
                 lock_project(db, p)
                 job = resource(db, p, job_id, "job")

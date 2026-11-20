@@ -204,7 +204,7 @@ def run_extraction(database, p, d, job_id, config):
                     raise APIError(409, 'CONFIG_CHANGED', '모델 설정이 변경되어 추출을 중단했습니다')
                 screens, _, _ = prepare_document(document)
                 transition_job(db, job, 'running', progress={'stage': 'condition_extraction', 'completed': 0, 'total': len(screens)})
-            client = analysis_client(config)
+            client = analysis_client(config, 'extraction')
 
             def check_cancelled():
                 with database.session() as db:
@@ -247,7 +247,8 @@ def run_extraction(database, p, d, job_id, config):
                        result={'requirement_count': len(ids), 'condition_count': sum(len(r['conditions']) for r in draft['requirements'])},
                        usage=usage, duration_ms=duration_ms, calls=stats.get('calls', 0),
                        reused_calls=stats.get('reused_calls', 0),
-                       estimated_cost_usd=estimate_cost_usd(usage, config.llm_model), missing_features=[])
+                       estimated_cost_usd=estimate_cost_usd(usage, config.model_for('extraction')),
+                       model=config.model_for('extraction'), missing_features=[])
         except APIError as error:
             if error.code == 'JOB_CANCELLED':
                 return

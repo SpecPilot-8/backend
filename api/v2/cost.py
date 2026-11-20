@@ -8,9 +8,18 @@
 #   3) 검증 단계별 사용량을 합산해 실행 전체 비용을 계산
 
 # 백만 토큰당 USD. 확인한 단가만 둔다. 모르는 모델은 금액을 지어내지 않는다.
+# 캐시 쓰기는 입력 단가의 1.25배, 캐시 읽기는 0.1배다 (Anthropic 1차 API 단가, 2026-11 기준).
+def _price(inp, out):
+    return {'input_tokens': inp, 'output_tokens': out,
+            'cache_read_input_tokens': round(inp * 0.1, 4), 'cache_creation_input_tokens': round(inp * 1.25, 4)}
+
+
 PRICES = {
-    'claude-opus-5': {'input_tokens': 5.0, 'output_tokens': 25.0,
-                      'cache_read_input_tokens': 0.5, 'cache_creation_input_tokens': 6.25},
+    'claude-opus-5': _price(5.0, 25.0),
+    'claude-opus-5-5': _price(4.0, 20.0),
+    'claude-sonnet-5-5': _price(2.0, 10.0),
+    'claude-sonnet-5': _price(2.0, 10.0),
+    'claude-haiku-5-5': _price(0.10, 0.50),
 }
 
 
@@ -24,10 +33,13 @@ def estimate_cost_usd(usage, model):
 
 
 def add_stage_costs(metrics, model):
-    """검증 metrics의 단계별 usage에 예상 비용을 붙이고 합계를 기록한다."""
+    """검증 metrics의 단계별 usage에 예상 비용을 붙이고 합계를 기록한다.
+
+    단계에 model이 기록돼 있으면(단계별 모델 지정) 그 모델 단가로, 없으면 인자 model로 계산한다.
+    """
     total = 0.0
     for stage in ('matching', 'condition_judgment'):
-        cost = estimate_cost_usd(metrics.get(stage, {}).get('usage', {}), model)
+        cost = estimate_cost_usd(metrics.get(stage, {}).get('usage', {}), metrics.get(stage, {}).get('model') or model)
         if cost is None:
             metrics['estimated_cost_usd'] = None
             return metrics
