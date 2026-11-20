@@ -630,3 +630,15 @@ call_flow의 nodes/edges는 정적 참조 관계다. 노드 순서를 임의의 
 새 스냅샷을 만들 때 같은 청킹 버전의 직전 스냅샷과 파일별 내용 해시를 비교한다. 경로와 내용이 같은 파일은 청크를 복사하고, 바뀌거나 새로 생기거나 옮겨진 파일만 다시 자른다. 복사한 청크도 새 스냅샷 안에서 새 id를 받으므로 이전 실행의 판정 근거는 그대로 남는다. 호출 그래프와 화면 범위는 검증할 때 스냅샷의 청크로 다시 계산하므로 바뀐 참조도 함께 갱신된다.
 
 `snapshot.incremental`: `{base_snapshot_id, reused_files, chunked_files}`. 첫 스냅샷은 base가 null이다.
+
+### 변경 영향 역추적 (11/20)
+
+`GET /projects/{p}/verification-runs/{v}/impact?snapshot_id=&file=`
+
+코드가 바뀌면 이 검증 실행의 어느 화면·요구사항·시험을 다시 봐야 하는지 정적 호출 그래프로 찾는다. 모델 호출은 없다.
+
+1) `snapshot_id`를 주면 실행의 스냅샷과 새 스냅샷의 파일을 비교한다. `file`(여러 개 가능)을 주면 그 파일을 고친다고 가정한다. 둘 다 없으면 422.
+2) 화면마다 진입 파일에서 도달하는 범위에 바뀐 파일이 있으면 영향 화면이다. 바뀐·지워진 파일은 기존 스냅샷 범위로, 바뀐·새 파일은 새 스냅샷 범위로 본다. 진입 파일이 지워진 화면도 포함한다.
+3) 응답: `{changed_files[{path,change}], unreached_files[], screen_count, requirement_count, test_case_count, screens[{screen_key,title,via_files[{path,change,entry}],entry_removed[],requirements[]}], test_cases[{test_specification_id,test_case_id,test_no,title,requirement_ids[]}]}`
+4) 화면 진입 파일이 없는 실행은 409 `IMPACT_SCOPE_MISSING`. 동적 호출·리플렉션은 잡지 못한다.
+
