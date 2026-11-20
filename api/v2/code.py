@@ -168,6 +168,29 @@ def chunk_file(path, text):
     return list(text_chunks(path, text))
 
 
+def file_hash(text):
+    return sha256(text.encode('utf-8')).hexdigest()
+
+
+def reusable_chunks(db, p, file_hashes):
+    """가장 최근 스냅샷(같은 청킹 버전)에서 경로·내용 해시가 같은 파일의 청크를 모은다.
+
+    파일이 옮겨진 경우는 재사용하지 않는다. JS 청크의 심볼 이름에 파일 경로가 들어가서
+    내용이 같아도 청크가 달라지기 때문이다. 반환값: (기준 스냅샷 id 또는 None, {경로: [청크 데이터]})
+    """
+    snapshots = [x for x in all_resources(db, p, 'snapshot') if x.data.get('chunking_version') == CHUNKING_VERSION]
+    if not snapshots:
+        return None, {}
+    base = snapshots[-1]
+    previous = base.data.get('file_hashes') or {path: file_hash(text) for path, text in base.data['files'].items()}
+    same = {path for path, digest in file_hashes.items() if previous.get(path) == digest}
+    out = {path: [] for path in same}
+    for item in all_resources(db, p, 'chunk'):
+        if item.data['snapshot_id'] == base.id and item.data['file_path'] in same:
+            out[item.data['file_path']].append({k: v for k, v in item.data.items() if k != 'snapshot_id'})
+    return base.id, {path: chunks for path, chunks in out.items() if chunks}
+
+
 @router.post('/sources', status_code=201)
 async def upload(p: str, db: DB, config: Config, file: Annotated[UploadFile, File()]):
     project(db, p)
@@ -209,15 +232,27 @@ def index(p: str, body: IndexRequest, db: DB, config: Config):
     warnings = [{'code': 'SOURCE_FILTER', 'message': '지원 소스 파일 전체를 인덱싱합니다. 미지원 파일, macOS 메타데이터, .git/node_modules/빌드 폴더는 제외됩니다'}, {'code': 'CALL_SCOPE_AT_VERIFICATION', 'message': '청킹을 완료했습니다. 검증 단계에서 화면 진입 파일을 확인하면 정적 도달 범위를 분석합니다'}]
     if any(Path(path).suffix.lower() in ('.ts', '.tsx') for path in files):
         warnings.append({'code': 'TYPESCRIPT_TEXT_ONLY', 'message': 'TypeScript는 원문 청크만 제공하며 의미 파서는 미지원입니다'})
+    file_hashes = {path: file_hash(text) for path, text in files.items()}
+    base, reusable = reusable_chunks(db, p, file_hashes)
     snapshot = create(db, p, 'snapshot', {'content_hash': content_hash, 'chunking_version': CHUNKING_VERSION,
                      'status': 'ready', 'source_kind': kind,
-                     'file_count': len(files), 'chunk_count': 0, 'warnings': warnings, 'files': files})
-    count = 0
+                     'file_count': len(files), 'chunk_count': 0, 'warnings': warnings, 'files': files,
+                     'file_hashes': file_hashes})
+    count, reused = 0, []
     for path, text in sorted(files.items()):
-        for chunk in chunk_file(path, text):
+        # 경로와 내용이 같은 파일은 직전 스냅샷의 청크를 복사한다. 청커가 결정적이라 다시 자른 결과와 같다.
+        # 새 스냅샷 안에서 새 청크 id를 받으므로 이전 판정 근거(이전 스냅샷의 청크)는 그대로 남는다.
+        if path in reusable:
+            pieces = reusable[path]
+            reused.append(path)
+        else:
+            pieces = chunk_file(path, text)
+        for chunk in pieces:
             create(db, p, 'chunk', {'snapshot_id': snapshot.id, **chunk})
             count += 1
-    snapshot.data = {**snapshot.data, 'chunk_count': count}
+    snapshot.data = {**snapshot.data, 'chunk_count': count,
+                     'incremental': {'base_snapshot_id': base, 'reused_files': len(reused),
+                                     'chunked_files': len(files) - len(reused)}}
     db.flush()
     return make_job(db, p, 'index_code', body.model_dump(), result_ref={'kind': 'snapshot', 'id': snapshot.id},
                     progress={'stage': 'chunking', 'completed': len(files), 'total': len(files)})
@@ -226,6 +261,7 @@ def index(p: str, body: IndexRequest, db: DB, config: Config):
 def snapshot_out(item):
     data = public(item)
     data.pop('files', None)
+    data.pop('file_hashes', None)
     return data
 
 
