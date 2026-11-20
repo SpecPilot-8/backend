@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+STAGES = ('extraction', 'matching', 'judgment', 'generation')
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -24,7 +27,12 @@ class Settings:
     llm_model: str = 'claude-opus-5'
     # 객체 문자열 출력이나 디버그 로그에 API 키가 노출되지 않도록 repr 대상에서 제외한다.
     llm_api_key: str = field(default='', repr=False)
+    # 단계별 모델 지정. 비어 있으면 llm_model을 쓴다. 키: extraction, matching, judgment, generation
+    stage_models: tuple[tuple[str, str], ...] = ()
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
+
+    def model_for(self, stage: str | None) -> str:
+        return dict(self.stage_models).get(stage, self.llm_model) if stage else self.llm_model
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -38,6 +46,8 @@ class Settings:
             llm_provider=os.getenv("SPECPILOT_LLM_PROVIDER", "anthropic"),
             llm_model=os.getenv("SPECPILOT_LLM_MODEL", "claude-opus-5"),
             llm_api_key=os.getenv("AI_GATEWAY_API_KEY" if os.getenv("SPECPILOT_LLM_PROVIDER", "anthropic") == "vercel" else "ANTHROPIC_API_KEY", ""),
+            stage_models=tuple((stage, os.environ[f"SPECPILOT_LLM_MODEL_{stage.upper()}"])
+                               for stage in STAGES if os.getenv(f"SPECPILOT_LLM_MODEL_{stage.upper()}")),
             cors_origins=tuple(x.strip() for x in os.getenv(
                 "SPECPILOT_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
             ).split(",") if x.strip()),

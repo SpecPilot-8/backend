@@ -163,7 +163,9 @@ def retrieval_candidates(index, members, scope, all_ids):
     return keep
 
 
-def judge_run(run, snapshot, raw_chunks, client, api_key, root, deliver, progress, metrics, cache=None, retriever=None):
+def judge_run(run, snapshot, raw_chunks, client, api_key, root, deliver, progress, metrics, cache=None, retriever=None,
+              judge_client=None):
+    judge_client = judge_client or client
     started = perf_counter()
     # 임시 디렉터리에 스냅샷 소스를 풀어 화면 진입 파일 기준 정적 도달 범위를 먼저 계산한다.
     builder, chunks, ids, metadata = make_builder(snapshot, raw_chunks, run['scope_config'], root)
@@ -236,7 +238,7 @@ def judge_run(run, snapshot, raw_chunks, client, api_key, root, deliver, progres
                     to_llm.append(ConditionInput(cid, condition['text'], tuple(r['quote'] for r in condition.get('source_refs', []))))
             if to_llm:
                 references = tuple(cid for cid in reference[rid] if cid not in union)
-                wrapper = ValidatedClient(client, api_key, metrics['condition_judgment'], len(union) + len(references),
+                wrapper = ValidatedClient(judge_client, api_key, metrics['condition_judgment'], len(union) + len(references),
                                           cache=cache)
                 progress('condition_judgment', done, len(reqs))
                 judged, used, error = judge_requirement(wrapper, context, req['stable_key'], req['original_text'] or req['title'],
@@ -289,7 +291,7 @@ def judge_run(run, snapshot, raw_chunks, client, api_key, root, deliver, progres
 
 
 def run_verification(database, p, run_id, config):
-    client = None
+    client = judge_client = None
     metrics = {'strategy': 'all_chunks', 'scope_duration_ms': None}
     for stage in ('matching', 'condition_judgment'):
         metrics[stage] = {'calls': 0, 'reused_calls': 0, 'submitted_chunks': 0, 'duration_ms': 0, 'usage': {}}
@@ -314,7 +316,12 @@ def run_verification(database, p, run_id, config):
                 chunks = [public(c) for c in all_resources(db, p, 'chunk') if c.data['snapshot_id'] == run['snapshot_id']]
                 replace(db, value, {**value.data, 'status': 'running'})
                 transition_job(db, job, 'running', progress={'stage': 'scope_analysis', 'completed': 0, 'total': len(run['requirements'])})
-            client = analysis_client(config)
+            # 매칭과 판정은 단계별 모델을 따로 지정할 수 있다 (SPECPILOT_LLM_MODEL_MATCHING / _JUDGMENT).
+            client = analysis_client(config, 'matching')
+            judge_client = (analysis_client(config, 'judgment')
+                            if config.model_for('judgment') != config.model_for('matching') else client)
+            metrics['matching']['model'] = config.model_for('matching')
+            metrics['condition_judgment']['model'] = config.model_for('judgment')
             def deliver(draft, trusted, graph, usage, done, total):
                 with database.session() as db:
                     lock_project(db, p)
@@ -351,7 +358,7 @@ def run_verification(database, p, run_id, config):
                     except ImportError:
                         metrics['retrieval_fallback'] = 'ImportError'
                 judge_run(run, snapshot, chunks, client, config.llm_api_key, Path(folder), deliver, on_progress, metrics,
-                          cache, retriever)
+                          cache, retriever, judge_client=judge_client)
         except APIError as error:
             if error.code == 'JOB_CANCELLED':
                 return
@@ -366,8 +373,9 @@ def run_verification(database, p, run_id, config):
             mark_failed(database, p, run_id, job_id, {'code': 'VERIFICATION_FAILED',
                 'message': '코드 검증에 실패했습니다. 서버 모델과 화면 진입 파일 설정을 확인하세요. 미완료 항목은 미분석으로 남깁니다'}, metrics)
         finally:
-            if client is not None and hasattr(client, 'close'):
-                client.close()
+            for item in {id(c): c for c in (client, judge_client) if c is not None}.values():
+                if hasattr(item, 'close'):
+                    item.close()
 
 
 def mark_failed(database, p, run_id, job_id, failure, metrics):

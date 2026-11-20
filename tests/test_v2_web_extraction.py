@@ -45,7 +45,7 @@ def web(config, monkeypatch):
         if control.hook:
             control.hook()
         return LLMResponse(control.data, KEY, 'test-model', {'input_tokens': 20, 'output_tokens': 10}, error=control.error)
-    monkeypatch.setattr(runner, 'analysis_client', lambda _: SimpleNamespace(complete_json=complete))
+    monkeypatch.setattr(runner, 'analysis_client', lambda *_: SimpleNamespace(complete_json=complete))
     with TestClient(create_app(config)) as c:
         p = c.post('/api/v2/projects', json={'name': '웹 추출'}).json()['id']
         with c.app.state.database.session() as db:

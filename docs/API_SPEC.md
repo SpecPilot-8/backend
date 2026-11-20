@@ -642,3 +642,7 @@ call_flow의 nodes/edges는 정적 참조 관계다. 노드 순서를 임의의 
 3) 응답: `{changed_files[{path,change}], unreached_files[], screen_count, requirement_count, test_case_count, screens[{screen_key,title,via_files[{path,change,entry}],entry_removed[],requirements[]}], test_cases[{test_specification_id,test_case_id,test_no,title,requirement_ids[]}]}`
 4) 화면 진입 파일이 없는 실행은 409 `IMPACT_SCOPE_MISSING`. 동적 호출·리플렉션은 잡지 못한다.
 
+### 단계별 모델 지정 (11/20)
+
+서버 환경변수 `SPECPILOT_LLM_MODEL_EXTRACTION`, `_MATCHING`, `_JUDGMENT`, `_GENERATION`으로 단계마다 모델을 지정한다. 없으면 `SPECPILOT_LLM_MODEL`. 모델 프로필 응답에 `stage_models`를 추가하고, 단계 모델이 바뀌면 연결 확인을 다시 해야 한다. 검증 `analysis_metrics.matching.model`, `condition_judgment.model`에 실제 쓴 모델을 기록하고 단계별 예상 비용은 그 모델 단가로 계산한다. 단가표에 Opus 5.5, Sonnet 5.5, Sonnet 5, Haiku 5.5를 추가했다.
+
